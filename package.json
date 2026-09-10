@@ -1,0 +1,12 @@
+{
+  "name": "ai-observatory",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@spacefast/zero": "0.0.24",
+    "preact": "10.29.7"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  }
+}

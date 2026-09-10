@@ -1,0 +1,29 @@
+name: collect
+
+# Zero cannot schedule an outbound fetch (crons are GET-only, GET handlers cannot
+# write, and fetch only exists inside client-invoked actions), so the schedule lives here.
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # catalogue
+    - cron: "17 3 * * *"     # daily signals
+  workflow_dispatch:
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Collect
+        env:
+          INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
+          OBSERVATORY_URL: https://ai-observatory.view.fast
+        run: |
+          if [ "${{ github.event.schedule }}" = "17 3 * * *" ]; then
+            node collector/fetch-and-post.mjs daily
+          else
+            node collector/fetch-and-post.mjs models
+            node collector/fetch-and-post.mjs status
+          fi

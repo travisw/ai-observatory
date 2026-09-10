@@ -1,0 +1,22 @@
+{
+  "settings": {
+    "color": {
+      "palette": [
+        { "slug": "canvas",    "color": "#0a0705", "name": "Canvas" },
+        { "slug": "surface",   "color": "#120d07", "name": "Surface" },
+        { "slug": "ink",       "color": "#ffdca6", "name": "Ink" },
+        { "slug": "ink-muted", "color": "#b3760a", "name": "Ink muted" },
+        { "slug": "line",      "color": "#4a3108", "name": "Line" },
+        { "slug": "accent",    "color": "#ffb000", "name": "Amber" },
+        { "slug": "success",   "color": "#3dff85", "name": "Online" },
+        { "slug": "warning",   "color": "#ffb000", "name": "Degraded" },
+        { "slug": "danger",    "color": "#ff5230", "name": "Down" }
+      ]
+    },
+    "typography": {
+      "fontFamilies": [
+        { "slug": "body", "fontFamily": "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", "name": "Terminal" }
+      ]
+    }
+  }
+}
