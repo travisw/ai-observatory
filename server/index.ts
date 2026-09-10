@@ -10,14 +10,12 @@ import {
 } from "../shared/model";
 
 /**
- * The capsule does not fetch anything.
+ * The capsule does not fetch anything. Collection runs on a schedule outside the app
+ * (see `collector/fetch-and-post.mjs`) and writes in through the mutations below, which
+ * keeps the schedule, the retries and the source list changeable without a redeploy.
  *
- * Zero has no way to run a scheduled outbound request: crons are GET-only, a GET is
- * classified as a read handler and may not write, and `fetch` is unavailable outside
- * actions, which only a browser can invoke. So collection happens outside (see
- * `collector/fetch-and-post.mjs`) and the capsule is a write-only ingest surface.
- * Everything that makes this an archive still lives here: the diffing, the schema,
- * the history, the console.
+ * Everything that makes this an archive lives here: the schema, the diffing, the
+ * history, and the console.
  */
 const now = () => new Date().toISOString();
 
@@ -165,11 +163,8 @@ export default capsule({
     /**
      * Ingests one chunk of an OpenRouter sweep and records what moved.
      *
-     * Ingest is a mutation rather than an endpoint because a capsule carrying write
-     * endpoints compiles to a write-mode artifact, and a write-mode artifact refuses
-     * live query subscriptions. Mutations and queries coexist; endpoints and queries
-     * do not. The collector reaches this over the same /__zero/run transport the
-     * browser uses.
+     * The collector reaches this over the same /__zero/run transport the browser uses,
+     * so ingest and the console share one code path and one set of guarantees.
      */
     ingestModels: mutation(async (ctx, token: string, runAt: string, data: RawModel[]) => {
       if (!allowed(ctx, token)) return { ok: false, error: "unauthorized" };

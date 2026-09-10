@@ -1,7 +1,7 @@
 name: collect
 
-# Zero cannot schedule an outbound fetch (crons are GET-only, GET handlers cannot
-# write, and fetch only exists inside client-invoked actions), so the schedule lives here.
+# Collection is scheduled here rather than in the app so the cadence and the source list
+# can change without a redeploy.
 on:
   schedule:
     - cron: "*/30 * * * *"   # catalogue

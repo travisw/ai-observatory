@@ -2,9 +2,9 @@
 /**
  * The observatory's legs.
  *
- * Zero cannot make a scheduled outbound request: crons are GET-only, a GET is a read
- * handler and may not write, and `fetch` exists only inside actions, which only a
- * browser can call. So the fetching lives out here and the capsule ingests what we post.
+ * Fetching lives out here rather than in the capsule, so the schedule, the retries and
+ * the source list can change without a redeploy, and a sweep can be run by hand from any
+ * machine against any environment.
  *
  * Runs anywhere with node 18+. No dependencies, no API keys: every source is public.
  *
@@ -49,13 +49,7 @@ async function getJson(url) {
   return res.json();
 }
 
-/**
- * Calls a capsule mutation over the same transport the browser uses.
- *
- * Ingest cannot be an HTTP endpoint: a capsule with write endpoints compiles to a
- * write-mode artifact, and that artifact then refuses the live query subscriptions the
- * console depends on. Mutations coexist with queries, so ingest goes through them.
- */
+/** Calls a capsule mutation over the same transport the browser uses. */
 async function callMutation(name, args) {
   const res = await fetch(`${BASE}/__zero/run`, {
     method: "POST",
