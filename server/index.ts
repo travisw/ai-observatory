@@ -210,8 +210,19 @@ export default capsule({
           continue;
         }
 
+        // Correct first-seen against the source's own listing date. Self-healing rather
+        // than insert-only, so rows written before this existed get fixed on the next
+        // sweep instead of leaving the archive with a flat wall at whenever we booted.
+        const listedAt = firstSeenFrom(raw.created, "");
+        const storedFirstSeen = String(prior.firstSeenAt ?? "");
+        const correctedFirstSeen =
+          listedAt && (!storedFirstSeen || listedAt < storedFirstSeen) ? listedAt : null;
+
         if (prior.fingerprint === fingerprint && prior.active === true) {
-          await ctx.db.models.update(prior.id, { lastSeenAt: at });
+          await ctx.db.models.update(prior.id, {
+            lastSeenAt: at,
+            ...(correctedFirstSeen ? { firstSeenAt: correctedFirstSeen } : {}),
+          });
           continue;
         }
 
@@ -249,6 +260,7 @@ export default capsule({
           fingerprint,
           lastSeenAt: at,
           active: true,
+          ...(correctedFirstSeen ? { firstSeenAt: correctedFirstSeen } : {}),
         });
       }
 
