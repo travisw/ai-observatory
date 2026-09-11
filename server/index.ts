@@ -156,6 +156,34 @@ export default capsule({
     recentPolls: query(async (ctx) =>
       ctx.db.polls.withIndex("by_at").order("desc").take(20)
     ),
+
+    /** Paged archive, newest first. `cursor` is null for the first page. */
+    eventsPage: query(async (ctx, cursor: string | null) =>
+      ctx.db.events.withIndex("by_at").order("desc").paginate({ cursor: cursor ?? null, numItems: 100 })
+    ),
+
+    /** Everything that ever happened to one model, oldest first, plus its current row. */
+    modelHistory: query(async (ctx, modelId: string) => {
+      const model = await ctx.db.models
+        .withIndex("by_model", (range) => range.eq("modelId", modelId))
+        .first();
+      const events = await ctx.db.events
+        .withIndex("by_model", (range) => range.eq("modelId", modelId))
+        .order("asc")
+        .collect();
+      return { model, events };
+    }),
+
+    /** Most recent successful run per source, so the console can say how fresh it is. */
+    freshness: query(async (ctx) => {
+      const recent = await ctx.db.polls.withIndex("by_at").order("desc").take(40);
+      const latest: Record<string, string> = {};
+      for (const row of recent) {
+        const source = String(row.source);
+        if (row.ok === true && !latest[source]) latest[source] = String(row.at);
+      }
+      return latest;
+    }),
   },
 
 

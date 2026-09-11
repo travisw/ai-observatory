@@ -43,10 +43,39 @@ const REPOS = [
   "anthropics/anthropic-sdk-python",
 ];
 
+// A real browser UA gets us past the basic bot check some status pages front with.
+const HEADERS = {
+  accept: "application/json",
+  "user-agent": "Mozilla/5.0 (compatible; ai-observatory collector; +https://ai-observatory.view.fast)",
+};
+
 async function getJson(url) {
-  const res = await fetch(url, { headers: { accept: "application/json" } });
-  if (!res.ok) throw new Error(`${url} -> ${res.status}`);
-  return res.json();
+  const res = await fetch(url, { headers: HEADERS });
+  if (!res.ok) {
+    const err = new Error(`${url} -> ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  const text = await res.text();
+  // Some hosts answer 200 with an HTML challenge page. Surface that as a clear
+  // failure rather than a JSON parse error.
+  if (text.trimStart().startsWith("<")) throw new Error(`${url} -> HTML instead of JSON`);
+  return JSON.parse(text);
+}
+
+/** Retries on 429/5xx with exponential backoff; gives up after `attempts`. */
+async function withBackoff(fn, { attempts = 5, baseMs = 4000 } = {}) {
+  let delay = baseMs;
+  for (let i = 1; ; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      const retryable = error.status === 429 || (error.status >= 500 && error.status < 600);
+      if (!retryable || i >= attempts) throw error;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      delay *= 2;
+    }
+  }
 }
 
 /** Calls a capsule mutation over the same transport the browser uses. */
@@ -101,8 +130,10 @@ async function collectStatus() {
         description: body?.status?.description ?? "",
       });
     } catch (error) {
-      // One unreachable status page is a gap, not a failed run.
-      console.warn(`status: ${source.provider} unavailable (${error.message})`);
+      // Record the outage of the status page itself rather than dropping the provider,
+      // so a gap in coverage is visible in the archive instead of silent.
+      console.warn(`status: ${source.provider} unreachable (${error.message})`);
+      providers.push({ provider: source.provider, indicator: "unreachable", description: error.message });
     }
   }
   await callMutation("ingestStatus", [TOKEN, providers]);
@@ -131,10 +162,10 @@ async function collectDaily() {
 
   const pypi = [];
   for (const pkg of PYPI_PACKAGES) {
-    // pypistats rate-limits bursts hard (429), and this is a once-a-day job.
-    await new Promise((resolve) => setTimeout(resolve, 2500));
+    // pypistats 429s on bursts. Backoff rather than a fixed sleep, since the limit
+    // window is longer than any polite pause and this is a once-a-day job with time.
     try {
-      const body = await getJson(`https://pypistats.org/api/packages/${pkg}/recent`);
+      const body = await withBackoff(() => getJson(`https://pypistats.org/api/packages/${pkg}/recent`));
       pypi.push({
         pkg,
         lastDay: body?.data?.last_day ?? 0,
