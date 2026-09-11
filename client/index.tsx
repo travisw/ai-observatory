@@ -248,20 +248,25 @@ function CatalogPage() {
   );
 }
 
-/** Rebuilds a price-over-time series from the change events plus the current value. */
+/**
+ * Rebuilds a price-over-time series from the change events plus the current value.
+ * Points are keyed to the minute, not the day: a model listed and repriced on the same
+ * day would otherwise collapse to one point and the change would vanish from the chart.
+ */
 function priceSeries(events: EventRow[], field: string, current: string, firstSeenAt: string) {
+  const key = (iso: string) => shortTime(iso);
   const points: { at: string; value: number }[] = [];
   const changes = events.filter((e) => e.kind === "changed" && e.field === field);
   if (changes.length === 0) {
     const v = Number(perMillion(current));
     return [
-      { at: firstSeenAt.slice(0, 10), value: v },
-      { at: new Date().toISOString().slice(0, 10), value: v },
+      { at: key(firstSeenAt), value: v },
+      { at: key(new Date().toISOString()), value: v },
     ];
   }
-  points.push({ at: firstSeenAt.slice(0, 10), value: Number(perMillion(changes[0].oldValue)) });
-  for (const c of changes) points.push({ at: c.at.slice(0, 10), value: Number(perMillion(c.newValue)) });
-  points.push({ at: new Date().toISOString().slice(0, 10), value: Number(perMillion(current)) });
+  points.push({ at: key(firstSeenAt), value: Number(perMillion(changes[0].oldValue)) });
+  for (const c of changes) points.push({ at: key(c.at), value: Number(perMillion(c.newValue)) });
+  points.push({ at: key(new Date().toISOString()), value: Number(perMillion(current)) });
   return points;
 }
 
