@@ -8,7 +8,7 @@
  *
  * Runs anywhere with node 18+. No dependencies, no API keys: every source is public.
  *
- *   INGEST_TOKEN=... OBSERVATORY_URL=https://ai-observatory.view.fast node collector/fetch-and-post.mjs [models|status|daily|all]
+ *   INGEST_TOKEN=... OBSERVATORY_URL=https://ai-observatory.view.fast node collector/fetch-and-post.mjs [models|status|sources|daily|all]
  */
 
 const BASE = process.env.OBSERVATORY_URL ?? "https://ai-observatory.view.fast";
@@ -119,6 +119,97 @@ async function collectModels() {
   );
 }
 
+/**
+ * Two catalogues that are not OpenRouter, so a price move can be checked against what the
+ * provider's own listing says. models.dev is a maintained open database of first-party
+ * listings; LiteLLM's price table is what most client libraries bill from. Both are one
+ * public JSON file. The capsule decides which providers count and how ids line up.
+ */
+const SOURCES = {
+  modelsdev: {
+    url: "https://models.dev/api.json",
+    // First-party listings only. The rest of models.dev is gateways relisting these.
+    providers: [
+      "anthropic", "openai", "google", "mistral", "deepseek", "xai", "meta", "cohere", "moonshotai", "zai",
+      "alibaba", "minimax", "perplexity", "ai21", "xiaomi", "stepfun", "inception", "upstage", "sakana",
+    ],
+    rows(body) {
+      const out = [];
+      for (const provider of this.providers) {
+        for (const [id, model] of Object.entries(body?.[provider]?.models ?? {})) {
+          const cost = model?.cost ?? {};
+          const outputs = model?.modalities?.output ?? [];
+          if (cost.input === undefined || !outputs.includes("text")) continue;
+          out.push({
+            provider,
+            sourceId: id,
+            name: model.name ?? id,
+            contextLength: model?.limit?.context,
+            maxCompletion: model?.limit?.output,
+            promptPrice: perToken(cost.input),
+            completionPrice: perToken(cost.output),
+            cacheReadPrice: cost.cache_read === undefined ? "" : perToken(cost.cache_read),
+            releaseDate: model.release_date ?? "",
+          });
+        }
+      }
+      return out;
+    },
+  },
+  litellm: {
+    url: "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
+    providers: [
+      "anthropic", "openai", "gemini", "mistral", "deepseek", "xai", "meta", "meta_llama", "cohere", "moonshot",
+      "zai", "dashscope", "minimax", "perplexity", "ai21",
+    ],
+    rows(body) {
+      const out = [];
+      for (const [id, model] of Object.entries(body ?? {})) {
+        if (id === "sample_spec" || !this.providers.includes(model?.litellm_provider)) continue;
+        if (!["chat", "responses", "completion"].includes(model.mode)) continue;
+        if (model.input_cost_per_token === undefined) continue;
+        out.push({
+          provider: model.litellm_provider,
+          sourceId: id,
+          name: id.includes("/") ? id.slice(id.indexOf("/") + 1) : id,
+          contextLength: model.max_input_tokens,
+          maxCompletion: model.max_output_tokens,
+          promptPrice: model.input_cost_per_token,
+          completionPrice: model.output_cost_per_token,
+          cacheReadPrice: model.cache_read_input_token_cost ?? "",
+          releaseDate: "",
+        });
+      }
+      return out;
+    },
+  },
+};
+
+/** Dollars per million to dollars per token without the float noise (0.1 / 1e6 is not 1e-7). */
+function perToken(perMillion) {
+  return Number((Number(perMillion) / 1e6).toPrecision(10));
+}
+
+async function collectSources() {
+  for (const [source, spec] of Object.entries(SOURCES)) {
+    const body = await withBackoff(() => getJson(spec.url));
+    // Shortest id first: when several ids collapse to one key, the rolling name wins.
+    const rows = spec.rows(body).sort((a, b) => a.sourceId.length - b.sourceId.length);
+    if (rows.length === 0) throw new Error(`${source} returned no usable rows`);
+
+    const runAt = new Date().toISOString();
+    let added = 0;
+    let changed = 0;
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const result = await callMutation("ingestSource", [TOKEN, source, runAt, rows.slice(i, i + CHUNK)]);
+      added += result.added ?? 0;
+      changed += result.changed ?? 0;
+    }
+    const closed = await callMutation("finalizeSource", [TOKEN, source, runAt, rows.length]);
+    console.log(`${source}: ${rows.length} rows sent, +${added} ~${changed} -${closed.removed ?? 0}`);
+  }
+}
+
 async function collectStatus() {
   const providers = [];
   for (const source of STATUS_PAGES) {
@@ -198,7 +289,7 @@ async function collectDaily() {
   );
 }
 
-const JOBS = { models: collectModels, status: collectStatus, daily: collectDaily };
+const JOBS = { models: collectModels, status: collectStatus, sources: collectSources, daily: collectDaily };
 
 async function main() {
   if (!TOKEN) {

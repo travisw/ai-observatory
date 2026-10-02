@@ -41,8 +41,11 @@ jobs:
           if [ "$JOB" = "once" ]; then
             node collector/fetch-and-post.mjs models
             node collector/fetch-and-post.mjs status
+            node collector/fetch-and-post.mjs sources
             exit 0
           fi
+          # The other catalogues move daily at most; once per six-hour job is plenty.
+          node collector/fetch-and-post.mjs sources || true
           # Sweep loop: ~11 sweeps over ~5h30m, then let the next trigger take over.
           end=$(( $(date +%s) + 5*3600 + 30*60 ))
           while [ "$(date +%s)" -lt "$end" ]; do

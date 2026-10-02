@@ -8,6 +8,7 @@ import {
   type TrackedField,
   type TrackedModel,
 } from "../shared/model";
+import { FIRST_PARTY, canonicalKey, canonicalProvider } from "../shared/sources";
 
 /**
  * The capsule does not fetch anything. Collection runs on a schedule outside the app
@@ -118,6 +119,46 @@ export default capsule({
       openIssues: string(),
     }).index("by_at", ["at"]),
 
+    /**
+     * What other catalogues say about the same models. One row per (source, model), keyed
+     * for matching against the OpenRouter row. Prices are per token, like `models`.
+     */
+    sourceModels: table({
+      source: string(),
+      key: string(),
+      sourceId: string(),
+      provider: string(),
+      name: string(),
+      contextLength: string(),
+      maxCompletion: string(),
+      promptPrice: string(),
+      completionPrice: string(),
+      cacheReadPrice: string(),
+      releaseDate: string(),
+      fingerprint: string(),
+      firstSeenAt: string(),
+      lastSeenAt: string(),
+      active: boolean(),
+    })
+      .index("by_source", ["source"])
+      .index("by_source_key", ["source", "key"])
+      .index("by_key", ["key"]),
+
+    /** Changes seen at the other catalogues, same shape as `events` plus the source. */
+    sourceEvents: table({
+      at: string(),
+      source: string(),
+      kind: string(),
+      key: string(),
+      sourceId: string(),
+      provider: string(),
+      field: string(),
+      oldValue: string(),
+      newValue: string(),
+    })
+      .index("by_at", ["at"])
+      .index("by_key", ["key"]),
+
     /** Run log, so the console can be honest about gaps in its own history. */
     polls: table({
       at: string(),
@@ -133,7 +174,10 @@ export default capsule({
       ctx.db.events.withIndex("by_at").order("desc").take(60)
     ),
     activeModels: query(async (ctx) =>
-      ctx.db.models.withIndex("by_model").order("asc").take(500)
+      ctx.db.models.withIndex("by_active", (range) => range.eq("active", true)).order("asc").take(2000)
+    ),
+    retiredModels: query(async (ctx) =>
+      ctx.db.models.withIndex("by_active", (range) => range.eq("active", false)).order("asc").take(2000)
     ),
     statuses: query(async (ctx) =>
       ctx.db.providerStatus.withIndex("by_provider").order("asc").take(50)
@@ -159,8 +203,20 @@ export default capsule({
 
     /** Paged archive, newest first. `cursor` is null for the first page. */
     eventsPage: query(async (ctx, cursor: string | null) =>
-      ctx.db.events.withIndex("by_at").order("desc").paginate({ cursor: cursor ?? null, numItems: 100 })
+      ctx.db.events.withIndex("by_at").order("desc").paginate({ cursor: cursor ?? null, numItems: 150 })
     ),
+
+    /** Catalogue size at each successful sweep, oldest first, for the trend line. */
+    sweepSizes: query(async (ctx) => {
+      const rows = await ctx.db.polls.withIndex("by_at").order("desc").take(400);
+      const out: { at: string; listed: number }[] = [];
+      for (const row of rows) {
+        if (row.source !== "models" || row.ok !== true) continue;
+        const match = /(\d+) listed/.exec(String(row.note ?? ""));
+        if (match) out.push({ at: String(row.at), listed: Number(match[1]) });
+      }
+      return out.reverse();
+    }),
 
     /** Everything that ever happened to one model, oldest first, plus its current row. */
     modelHistory: query(async (ctx, modelId: string) => {
@@ -173,6 +229,22 @@ export default capsule({
         .collect();
       return { model, events };
     }),
+
+    /** Other catalogues' listings for one canonical key, with everything that changed there. */
+    crossSources: query(async (ctx, key: string) => {
+      const listings = await ctx.db.sourceModels
+        .withIndex("by_key", (range) => range.eq("key", key))
+        .collect();
+      const events = await ctx.db.sourceEvents
+        .withIndex("by_key", (range) => range.eq("key", key))
+        .order("asc")
+        .collect();
+      return { listings, events };
+    }),
+
+    recentSourceEvents: query(async (ctx) =>
+      ctx.db.sourceEvents.withIndex("by_at").order("desc").take(200)
+    ),
 
     /** Most recent successful run per source, so the console can say how fresh it is. */
     freshness: query(async (ctx) => {
@@ -324,6 +396,121 @@ export default capsule({
       return { ok: true, removed };
     }),
 
+    /**
+     * Ingests one chunk of another catalogue. Same diff-and-record shape as `ingestModels`,
+     * kept separate because these rows are keyed for matching rather than by their own id.
+     */
+    ingestSource: mutation(async (ctx, token: string, source: string, runAt: string, data: SourceListing[]) => {
+      if (!allowed(ctx, token)) return { ok: false, error: "unauthorized" };
+      const at = runAt || now();
+      let added = 0;
+      let changed = 0;
+
+      const existingRows = await ctx.db.sourceModels
+        .withIndex("by_source", (range) => range.eq("source", source))
+        .collect();
+      const existing = new Map(existingRows.map((row) => [String(row.key), row]));
+      // The first sweep of a source is a snapshot, not a set of arrivals. Rows are stored but
+      // no "added" events are written, since every later chunk of that run sees only rows
+      // stamped with this run's time.
+      const bootstrap = existingRows.every((row) => String(row.firstSeenAt ?? "") === at);
+
+      for (const raw of data ?? []) {
+        if (!raw.sourceId || !raw.provider) continue;
+        const provider = canonicalProvider(raw.provider);
+        if (!FIRST_PARTY.has(provider)) continue;
+        const key = canonicalKey(raw.provider, raw.sourceId);
+        const listing = {
+          source,
+          key,
+          sourceId: raw.sourceId,
+          provider,
+          name: raw.name ?? "",
+          contextLength: normalizeNumeric(raw.contextLength),
+          maxCompletion: normalizeNumeric(raw.maxCompletion),
+          promptPrice: normalizeNumeric(raw.promptPrice),
+          completionPrice: normalizeNumeric(raw.completionPrice),
+          cacheReadPrice: normalizeNumeric(raw.cacheReadPrice),
+          releaseDate: raw.releaseDate ?? "",
+        };
+        const fingerprint = SOURCE_FIELDS.map((field) => listing[field]).join("|");
+        const prior = existing.get(key);
+
+        // Several ids can share a key (a dated snapshot and its rolling name). The collector
+        // sends the shortest id first and the rest are skipped for this sweep.
+        if (prior && String(prior.lastSeenAt ?? "") === at) continue;
+
+        if (!prior) {
+          const row = await ctx.db.sourceModels.insert({ ...listing, fingerprint, firstSeenAt: at, lastSeenAt: at, active: true });
+          existing.set(key, row);
+          if (!bootstrap) {
+            await ctx.db.sourceEvents.insert({
+              at, source, kind: "added", key, sourceId: listing.sourceId, provider,
+              field: "", oldValue: "", newValue: listing.name,
+            });
+          }
+          added++;
+          continue;
+        }
+
+        if (prior.fingerprint === fingerprint && prior.active === true) {
+          const row = await ctx.db.sourceModels.update(prior.id, { lastSeenAt: at });
+          if (row) existing.set(key, row);
+          continue;
+        }
+
+        for (const field of SOURCE_FIELDS) {
+          const before = String(prior[field] ?? "");
+          const after = listing[field];
+          if (before === after) continue;
+          await ctx.db.sourceEvents.insert({
+            at, source, kind: "changed", key, sourceId: listing.sourceId, provider,
+            field, oldValue: before, newValue: after,
+          });
+          changed++;
+        }
+        if (prior.active === false) {
+          await ctx.db.sourceEvents.insert({
+            at, source, kind: "returned", key, sourceId: listing.sourceId, provider,
+            field: "", oldValue: "", newValue: listing.name,
+          });
+        }
+        const row = await ctx.db.sourceModels.update(prior.id, { ...listing, fingerprint, lastSeenAt: at, active: true });
+        if (row) existing.set(key, row);
+      }
+
+      return { ok: true, added, changed };
+    }),
+
+    finalizeSource: mutation(async (ctx, token: string, source: string, runAt: string, listed: number) => {
+      if (!allowed(ctx, token)) return { ok: false, error: "unauthorized" };
+      const started = Date.now();
+      const at = runAt || now();
+      let removed = 0;
+
+      const rows = await ctx.db.sourceModels
+        .withIndex("by_source", (range) => range.eq("source", source))
+        .collect();
+      for (const row of rows) {
+        if (row.active === false || String(row.lastSeenAt ?? "") === at) continue;
+        await ctx.db.sourceModels.update(row.id, { active: false });
+        await ctx.db.sourceEvents.insert({
+          at, source, kind: "removed", key: String(row.key), sourceId: String(row.sourceId), provider: String(row.provider),
+          field: "", oldValue: String(row.name ?? ""), newValue: "",
+        });
+        removed++;
+      }
+
+      await ctx.db.polls.insert({
+        at,
+        source,
+        ok: true,
+        note: `${listed} listed, ${removed} retired`,
+        ms: String(Date.now() - started),
+      });
+      return { ok: true, removed };
+    }),
+
     ingestStatus: mutation(async (ctx, token: string, providers: StatusReport[]) => {
       if (!allowed(ctx, token)) return { ok: false, error: "unauthorized" };
       const started = Date.now();
@@ -451,6 +638,21 @@ type RawModel = {
   supported_parameters?: string[];
   created?: number;
 };
+
+type SourceListing = {
+  sourceId: string;
+  provider: string;
+  name?: string;
+  contextLength?: number | string;
+  maxCompletion?: number | string;
+  promptPrice?: number | string;
+  completionPrice?: number | string;
+  cacheReadPrice?: number | string;
+  releaseDate?: string;
+};
+
+/** What is diffed between sweeps of another catalogue. */
+const SOURCE_FIELDS = ["name", "contextLength", "maxCompletion", "promptPrice", "completionPrice", "cacheReadPrice"] as const;
 
 type StatusReport = { provider: string; indicator: string; description?: string };
 type PackageReport = { pkg: string; downloads?: number };
