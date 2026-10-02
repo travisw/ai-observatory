@@ -6,8 +6,8 @@
  * that happened to one model in one sweep, with a headline, a score for how much it matters,
  * and the rows underneath for anyone who wants them.
  */
-import { formatContext, perMillion } from "./model";
-import { modelName, providerName } from "./providers";
+import { contextPair, formatContext, money } from "./model";
+import { isAlias, modelName, providerName } from "./providers";
 
 export type ArchiveEvent = {
   id: string;
@@ -40,7 +40,10 @@ export type Story = {
   provider: string;
   kind: StoryKind;
   headline: string;
+  /** The one or two numbers a reader wants: input and output price, or context. */
   detail: string;
+  /** Everything else that moved in the same sweep, for the model page. */
+  more: string[];
   score: number;
   events: ArchiveEvent[];
   /** Set when several drift stories were folded into one. */
@@ -52,6 +55,9 @@ export type Story = {
 
 /** Below this, a price move is exchange-rate wobble or rounding, not a decision anyone made. */
 export const DRIFT_THRESHOLD_PCT = 3;
+
+/** A price that comes back to within this of where it started, within a day, was a flap, not a change. */
+const FLAP_TOLERANCE_PCT = 5;
 
 const PRICE_FIELDS = ["promptPrice", "completionPrice", "cacheReadPrice", "cacheWritePrice"] as const;
 const PRICE_LABEL: Record<string, string> = {
@@ -78,7 +84,10 @@ function fmtPct(value: number): string {
 }
 
 function priceMove(e: ArchiveEvent): string {
-  return `${PRICE_LABEL[e.field]} $${perMillion(e.oldValue)} → $${perMillion(e.newValue)} /M`;
+  const label = PRICE_LABEL[e.field];
+  if (!e.oldValue) return `${label} now ${money(e.newValue)}`;
+  if (!e.newValue) return `${label} price removed (was ${money(e.oldValue)})`;
+  return `${label} ${money(e.oldValue)} → ${money(e.newValue)}`;
 }
 
 /** "gained tools, reasoning · lost seed" for a comma-list field. */
@@ -109,12 +118,12 @@ function buildStory(events: ArchiveEvent[], names: Map<string, string>): Story {
   const lifecycle = events.find((e) => e.kind !== "changed");
   if (lifecycle) {
     if (lifecycle.kind === "added") {
-      return { ...base, kind: "listed", score: 70, headline: `${provider} listed ${model}`, detail: lifecycle.newValue };
+      return { ...base, kind: "listed", score: 70, headline: `${provider} listed a new model: ${model}`, detail: "", more: [] };
     }
     if (lifecycle.kind === "removed") {
-      return { ...base, kind: "delisted", score: 80, headline: `${provider} delisted ${model}`, detail: "no longer in the catalogue" };
+      return { ...base, kind: "delisted", score: 80, headline: `${provider} removed ${model}`, detail: "no longer available", more: [] };
     }
-    return { ...base, kind: "relisted", score: 60, headline: `${model} is back`, detail: `${provider} relisted it` };
+    return { ...base, kind: "relisted", score: 60, headline: `${model} is back`, detail: `${provider} relisted it`, more: [] };
   }
 
   const fieldOrder = (e: ArchiveEvent) => PRICE_FIELDS.indexOf(e.field as (typeof PRICE_FIELDS)[number]);
@@ -125,24 +134,27 @@ function buildStory(events: ArchiveEvent[], names: Map<string, string>): Story {
   const rest = events.filter((e) => !prices.includes(e) && !sizes.includes(e) && e !== renamed && e !== params);
 
   const details: string[] = [];
+  const more: string[] = [];
   let kind: StoryKind = "other";
   let score = 10;
   let headline = "";
 
   if (prices.length) {
     const lead = prices.find((e) => e.field === "promptPrice") ?? prices.find((e) => e.field === "completionPrice") ?? prices[0];
-    const moves = prices.map((e) => pct(e.oldValue, e.newValue));
+    const quoted = prices.filter((e) => e.field === "promptPrice" || e.field === "completionPrice");
+    const moves = quoted.length ? quoted.map((e) => pct(e.oldValue, e.newValue)) : prices.map((e) => pct(e.oldValue, e.newValue));
     const biggest = Math.max(...moves.map(Math.abs));
     const allDown = moves.every((m) => m <= 0);
     const allUp = moves.every((m) => m >= 0);
-    details.push(...prices.map(priceMove));
+    for (const e of prices) (quoted.includes(e) ? details : more).push(priceMove(e));
     if (biggest < DRIFT_THRESHOLD_PCT) {
       kind = "drift";
       score = 5;
-      headline = `${model} price drifted ${fmtPct(pct(lead.oldValue, lead.newValue))}`;
+      headline = `${model} price moved ${fmtPct(pct(lead.oldValue, lead.newValue))}`;
     } else {
       kind = "repriced";
-      score = 40 + Math.min(50, biggest);
+      // A move in the quoted prices is news; a cache-only move is a footnote.
+      score = quoted.length ? 40 + Math.min(50, biggest) : 20 + Math.min(20, biggest / 4);
       // Input and output are what people quote. Name both when they moved differently.
       const named = prices
         .filter((e) => e.field === "promptPrice" || e.field === "completionPrice")
@@ -166,19 +178,21 @@ function buildStory(events: ArchiveEvent[], names: Map<string, string>): Story {
   }
 
   if (sizes.length) {
-    const lead = sizes.find((e) => e.field === "contextLength") ?? sizes[0];
+    const context = sizes.find((e) => e.field === "contextLength");
+    const lead = context ?? sizes[0];
     const move = pct(lead.oldValue, lead.newValue);
-    const sizeScore = 30 + Math.min(40, Math.abs(move) / 2);
-    details.push(...sizes.map((e) => `${SIZE_LABEL[e.field]} ${formatContext(e.oldValue)} → ${formatContext(e.newValue)}`));
+    // Context is a headline number; max output only matters when nothing else moved.
+    const sizeScore = context ? 30 + Math.min(40, Math.abs(move) / 2) : 12;
+    for (const e of sizes) (e.field === "contextLength" ? details : more).push(`${SIZE_LABEL[e.field]} ${contextPair(e.oldValue, e.newValue)}`);
     if (sizeScore > score) {
       kind = "resized";
       score = sizeScore;
-      headline = `${provider} ${move > 0 ? "expanded" : "shrank"} ${model} ${SIZE_LABEL[lead.field]} to ${formatContext(lead.newValue)}`;
+      headline = `${provider} ${move > 0 ? "raised" : "lowered"} ${model} ${SIZE_LABEL[lead.field]} to ${formatContext(lead.newValue)}`;
     }
   }
 
   if (renamed) {
-    details.push(`renamed from "${renamed.oldValue}"`);
+    more.push(`renamed from "${renamed.oldValue}"`);
     if (score < 20) {
       kind = "renamed";
       score = 20;
@@ -188,7 +202,7 @@ function buildStory(events: ArchiveEvent[], names: Map<string, string>): Story {
 
   if (params) {
     const diff = listDiff(params.oldValue, params.newValue);
-    details.push(`parameters: ${diff || "reordered"}`);
+    more.push(`parameters: ${diff || "reordered"}`);
     if (score < 15) {
       kind = "capabilities";
       score = 15;
@@ -196,10 +210,84 @@ function buildStory(events: ArchiveEvent[], names: Map<string, string>): Story {
     }
   }
 
-  for (const e of rest) details.push(`${e.field} changed`);
+  for (const e of rest) more.push(`${e.field} changed`);
   if (!headline) headline = `${provider} changed ${model}`;
 
-  return { ...base, kind, score, headline, detail: details.join(" · ") };
+  return { ...base, kind, score, headline, detail: details.join(" · "), more };
+}
+
+/**
+ * Drops a rolling alias's story when the model it points at tells the same story in the same
+ * sweep. "DeepSeek Flash Latest" repricing is not news if "DeepSeek V4.1 Flash" repriced
+ * identically; it is the same change seen twice. An alias moving on its own is kept, since that
+ * usually means it was repointed.
+ */
+export function foldAliases(stories: Story[]): Story[] {
+  // Matched on the shape of the move, not the exact cents: an alias is often routed a little
+  // differently from the model it names, so the same 56% cut lands at slightly different prices.
+  const signature = (s: Story) =>
+    `${s.provider.replace(/^~/, "")}|${s.at}|${s.kind}|${s.events
+      .filter((e) => e.field === "promptPrice" || e.field === "completionPrice")
+      .map((e) => `${e.field}:${Math.round(pct(e.oldValue, e.newValue))}`)
+      .sort()
+      .join(",")}`;
+  const concrete = new Set(stories.filter((s) => !isAlias(s.modelId)).map(signature));
+  return stories.filter((s) => !isAlias(s.modelId) || s.kind === "listed" || s.kind === "delisted" || !concrete.has(signature(s)));
+}
+
+/**
+ * Folds a model's repricings within one calendar day that end up back where they started.
+ * A price that goes up 168% and back down 63% two hours later is one flapping price, not two
+ * stories, and it should not lead the page.
+ */
+export function foldFlapping(stories: Story[]): Story[] {
+  const WINDOW = 24 * 3600 * 1000;
+  const byModel = new Map<string, Story[]>();
+  for (const s of stories) {
+    if (s.kind !== "repriced" || s.source) continue;
+    const list = byModel.get(s.modelId);
+    if (list) list.push(s);
+    else byModel.set(s.modelId, [s]);
+  }
+  const replaced = new Map<string, Story>();
+  const dropped = new Set<string>();
+  const fold = (run: Story[]) => {
+    const newest = run[run.length - 1];
+    const model = modelName(newest.modelId, undefined);
+    replaced.set(newest.key, {
+      ...newest,
+      kind: "drift",
+      score: 8,
+      folded: run.length,
+      events: run.flatMap((s) => s.events),
+      headline: `${model} price flipped ${run.length} times and ended where it started`,
+      detail: run.map((s) => s.detail).filter(Boolean).join(", then ").slice(0, 160),
+      more: [],
+    });
+    for (const s of run.slice(0, -1)) dropped.add(s.key);
+  };
+  for (const group of byModel.values()) {
+    const ordered = [...group].sort((a, b) => a.at.localeCompare(b.at));
+    // Walk forward; a run closes when the price is back within a few percent of where some
+    // earlier story in the last 24 hours started.
+    let start = 0;
+    for (let i = 1; i < ordered.length; i++) {
+      for (let j = start; j < i; j++) {
+        if (Date.parse(ordered[i].at) - Date.parse(ordered[j].at) > WINDOW) continue;
+        const run = ordered.slice(j, i + 1);
+        const net = (field: string) => {
+          const moves = run.flatMap((s) => s.events.filter((e) => e.field === field));
+          return moves.length ? pct(moves[0].oldValue, moves[moves.length - 1].newValue) : 0;
+        };
+        if (Math.abs(net("promptPrice")) < FLAP_TOLERANCE_PCT && Math.abs(net("completionPrice")) < FLAP_TOLERANCE_PCT) {
+          fold(run);
+          start = i + 1;
+          break;
+        }
+      }
+    }
+  }
+  return stories.filter((s) => !dropped.has(s.key)).map((s) => replaced.get(s.key) ?? s);
 }
 
 /** Groups rows by model and sweep. Input order does not matter; output is newest first. */
@@ -245,8 +333,8 @@ export function foldDrift(stories: Story[]): Story[] {
     const newest = lead[0];
     const net = oldest && newest ? pct(oldest.oldValue, newest.newValue) : 0;
     const model = s.headline.replace(/ price drifted.*$/, "");
-    s.headline = `${model} price drifted ${s.folded}× (net ${net < 0 ? "−" : "+"}${fmtPct(net)})`;
-    s.detail = oldest && newest ? `input $${perMillion(oldest.oldValue)} → $${perMillion(newest.newValue)} /M over the day` : s.detail;
+    s.headline = `${model} price moved ${s.folded} times, net ${net < 0 ? "−" : "+"}${fmtPct(net)}`;
+    s.detail = oldest && newest ? `input ${money(oldest.oldValue)} → ${money(newest.newValue)} over the day` : s.detail;
   }
   return out;
 }

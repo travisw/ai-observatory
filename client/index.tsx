@@ -3,10 +3,10 @@ import { LineChart, Sparkline } from "@spacefast/zero/charts";
 import { EmptyState } from "@spacefast/zero/kit";
 import { useState } from "preact/hooks";
 
-import { formatContext, perMillion, shortTime } from "../shared/model";
+import { formatContext, money, perMillion, shortTime } from "../shared/model";
 import { isAlias, modelName, providerName } from "../shared/providers";
 import { SOURCE_LABEL, canonicalKey } from "../shared/sources";
-import { corroborate, foldDrift, groupStories, headlines, tally, type ArchiveEvent, type Story } from "../shared/stories";
+import { corroborate, foldAliases, foldDrift, foldFlapping, groupStories, headlines, tally, type ArchiveEvent, type Story } from "../shared/stories";
 
 type ModelRow = {
   id: string;
@@ -81,11 +81,48 @@ function indicatorTone(indicator: string) {
 }
 
 function indicatorWord(indicator: string) {
-  if (indicator === "none") return "operational";
+  if (indicator === "none") return "up";
   if (indicator === "minor") return "degraded";
   if (indicator === "critical" || indicator === "major") return "outage";
-  if (indicator === "unreachable") return "unreachable";
+  if (indicator === "unreachable") return "status page unreachable";
   return indicator;
+}
+
+const WATCH_KEY = "observatory.watch";
+
+function readWatch(): string {
+  try {
+    return localStorage.getItem(WATCH_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function writeWatch(value: string) {
+  try {
+    if (value) localStorage.setItem(WATCH_KEY, value);
+    else localStorage.removeItem(WATCH_KEY);
+  } catch {
+    // Private mode or storage disabled: the filter still works for this visit.
+  }
+}
+
+/** Comma-separated terms; a story matches if any term appears in its model id, provider or headline. */
+function matchesWatch(story: Story, watch: string): boolean {
+  const terms = watch.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean);
+  if (terms.length === 0) return true;
+  const hay = `${story.modelId} ${providerName(story.provider)} ${story.headline}`.toLowerCase();
+  return terms.some((t) => hay.includes(t));
+}
+
+/** "yesterday", "on Tuesday", "3 weeks ago": for the example sentence in the intro. */
+function whenWord(iso: string): string {
+  const days = Math.floor((Date.now() - Date.parse(iso)) / DAY);
+  if (days < 1) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 7) return `on ${new Date(iso).toLocaleDateString(undefined, { weekday: "long" })}`;
+  if (days < 14) return "last week";
+  return `${Math.floor(days / 7)} weeks ago`;
 }
 
 function storyTone(kind: Story["kind"]) {
@@ -164,7 +201,12 @@ function StoryLine({ story, href, showModel = true, relative = false }: { story:
           )}
           <SourceTag story={story} />
         </span>
-        {story.detail ? <span class="block truncate text-ink-muted">{story.detail}</span> : null}
+        {story.detail || story.more.length ? (
+          <span class="block truncate text-ink-muted" title={story.more.join(" · ")}>
+            {story.detail}
+            {story.more.length ? <span class="opacity-70">{story.detail ? " · " : ""}+{story.more.length} more</span> : null}
+          </span>
+        ) : null}
       </div>
       <span class="shrink-0 text-ink-muted">{relative ? ago(story.at) : story.at.slice(11, 16)}</span>
     </li>
@@ -190,8 +232,7 @@ function StatusStrip({ statuses }: { statuses: StatusRow[] | undefined }) {
         <li key={s.id} class="flex items-center gap-1.5" title={`${s.description || indicatorWord(s.indicator)} · checked ${ago(s.checkedAt)}`}>
           <span class={indicatorTone(s.indicator)} aria-hidden="true">●</span>
           <span class="text-ink">{providerName(s.provider)}</span>
-          <span class="sr-only">{indicatorWord(s.indicator)}</span>
-          {s.indicator !== "none" ? <span class={indicatorTone(s.indicator)}>{indicatorWord(s.indicator)}</span> : null}
+          <span class={indicatorTone(s.indicator)}>{indicatorWord(s.indicator)}</span>
         </li>
       ))}
     </ul>
@@ -210,14 +251,26 @@ function ChangesPage() {
   const last = pages[pages.length - 1];
   const events = pages.flatMap((p) => p?.page ?? []);
 
+  const [watch, setWatch] = useState(readWatch);
+  const updateWatch = (value: string) => {
+    setWatch(value);
+    writeWatch(value);
+  };
+
   const names = nameIndex(models);
   const keyToModel = new Map((models ?? []).map((m) => [canonicalKey(m.provider, m.modelId), m.modelId]));
   const linkFor = (s: Story) => (s.source ? (keyToModel.has(s.modelId) ? modelHref(keyToModel.get(s.modelId) as string) : null) : modelHref(s.modelId));
-  const stories = corroborate(foldDrift(groupStories([...events, ...asArchive(sourceEvents)], names)), keyOf);
+  const all = corroborate(foldFlapping(foldAliases(foldDrift(groupStories([...events, ...asArchive(sourceEvents)], names)))), keyOf);
+  const stories = all.filter((s) => matchesWatch(s, watch));
   const lead = headlines(stories, Date.now());
   const weekAgo = new Date(Date.now() - 7 * DAY).toISOString();
   const week = tally(stories, weekAgo);
-  const drifting = new Set(stories.filter((s) => s.kind === "drift" && s.at >= lead.stories[lead.stories.length - 1]?.at).map((s) => s.modelId));
+  const small = stories.filter((s) => s.kind === "drift" && s.at >= weekAgo).reduce((n, s) => n + (s.folded ?? 1), 0);
+
+  // The intro's example: the biggest plain price or availability story of the past week.
+  const example = all
+    .filter((s) => !s.source && !isAlias(s.modelId) && (s.kind === "repriced" || s.kind === "listed" || s.kind === "delisted") && s.at >= weekAgo)
+    .sort((a, b) => b.score - a.score)[0];
 
   const active = models ?? [];
   const providers = new Set(active.map((m) => m.provider.replace(/^~/, "")));
@@ -234,21 +287,50 @@ function ChangesPage() {
   }
 
   const windowLabel = lead.windowHours === 24 ? "last 24 hours" : lead.windowHours === 72 ? "last 3 days" : lead.windowHours === 168 ? "last 7 days" : lead.windowHours === 720 ? "last 30 days" : "all time";
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  const weekLine = [
+    plural(week.repriced, "price change"),
+    plural(week.listed, "new model"),
+    week.delisted ? plural(week.delisted, "model removed") : "none removed",
+    week.resized ? plural(week.resized, "context change") : "",
+    small ? `${small} small or back-and-forth moves folded away` : "",
+  ].filter(Boolean).join(", ");
 
   return (
     <div class="flex flex-col gap-4">
-      <p class="max-w-3xl font-mono text-sm leading-relaxed text-ink">
-        Tracking <span class="text-accent">{active.length}</span> models from{" "}
-        <span class="text-accent">{providers.size}</span> providers. Prices, context windows and availability,
-        checked every 30 minutes and kept forever. Providers change these things without announcing them.
-        This is the changelog they don't publish.
-      </p>
+      <div class="max-w-3xl font-mono text-sm leading-relaxed text-ink">
+        <p>
+          If you build on AI models, the price and limits of the one you picked change under you, and nobody sends an
+          email. {example ? (
+            <>
+              {whenWord(example.at).charAt(0).toUpperCase() + whenWord(example.at).slice(1)}:{" "}
+              <Link to={modelHref(example.modelId)} class="text-accent hover:underline">{example.headline}</Link>.{" "}
+            </>
+          ) : null}
+          This page checks {active.length} models from {providers.size} providers every half hour, writes down what moved, and keeps the record.
+        </p>
+      </div>
 
-      <Panel title="What changed" hint={windowLabel}>
+      <label class="flex max-w-3xl flex-wrap items-center gap-2 font-mono text-xs text-ink-muted">
+        <span>Only show models I care about:</span>
+        <input
+          class="min-w-64 flex-1 border border-line bg-surface px-2 py-1 text-ink placeholder:text-ink-muted"
+          placeholder="e.g. claude, gpt-5, deepseek"
+          value={watch}
+          onInput={(e) => updateWatch((e.currentTarget as HTMLInputElement).value)}
+        />
+        {watch ? (
+          <button type="button" class="text-accent hover:underline" onClick={() => updateWatch("")}>clear</button>
+        ) : null}
+      </label>
+
+      <Panel title={watch ? `What changed for "${watch}"` : "What changed"} hint={`${windowLabel} · prices per million tokens`}>
         {events.length === 0 ? (
           <EmptyState title="Nothing recorded yet" description="The archive fills as providers change things." />
         ) : lead.stories.length === 0 ? (
-          <p class="font-mono text-xs text-ink-muted">Quiet. Only exchange-rate drift in this window.</p>
+          <p class="font-mono text-xs text-ink-muted">
+            {watch ? `Nothing for "${watch}" in the loaded log. Try "load older" below, or a shorter term.` : "Quiet. Only small price moves in this window."}
+          </p>
         ) : (
           <ul class="flex flex-col">
             {lead.stories.map((s) => (
@@ -256,30 +338,16 @@ function ChangesPage() {
             ))}
           </ul>
         )}
-        {drifting.size > 0 ? (
-          <p class="mt-2 font-mono text-xs text-ink-muted">
-            Also {drifting.size} model{drifting.size === 1 ? "" : "s"} whose price wobbles with an exchange rate. Those are folded into the log below.
-          </p>
-        ) : null}
+        <p class="mt-3 font-mono text-xs text-ink-muted">This week: {weekLine}.{!last?.isDone ? " Counts cover what is loaded." : ""}</p>
       </Panel>
 
-      <div class="grid gap-4 sm:grid-cols-3">
-        <Panel title="This week">
-          <dl class="grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-xs">
-            <dt class="text-ink-muted">listed</dt><dd class="text-success">{week.listed}</dd>
-            <dt class="text-ink-muted">delisted</dt><dd class="text-danger">{week.delisted}</dd>
-            <dt class="text-ink-muted">repriced</dt><dd class="text-accent">{week.repriced}</dd>
-            <dt class="text-ink-muted">resized</dt><dd class="text-accent">{week.resized}</dd>
-            <dt class="text-ink-muted">price drift</dt><dd class="text-ink-muted">{week.drift}</dd>
-          </dl>
-          {!last?.isDone ? <p class="mt-2 font-mono text-xs text-ink-muted">counts cover the loaded log</p> : null}
-        </Panel>
-        <Panel title="Catalogue size" hint={delta ? `${delta > 0 ? "+" : ""}${delta} this week` : "flat this week"}>
+      <div class="grid gap-4 sm:grid-cols-2">
+        <Panel title="Models available" hint={delta ? `${delta > 0 ? "+" : ""}${delta} this week` : "unchanged this week"}>
           <p class="font-mono text-3xl text-accent">{active.length}</p>
           {trend.length > 1 ? <Sparkline values={trend} height={36} /> : null}
-          <p class="font-mono text-xs text-ink-muted">{trend.length} sweeps shown</p>
+          <p class="font-mono text-xs text-ink-muted">from {providers.size} providers · <Link to="/models" class="text-accent hover:underline">browse them</Link></p>
         </Panel>
-        <Panel title="Provider status" hint="status pages">
+        <Panel title="Is it up right now?" hint="from each provider's status page">
           <StatusStrip statuses={statuses} />
         </Panel>
       </div>
@@ -289,7 +357,7 @@ function ChangesPage() {
           <details key={day} open={day === [...byDay.keys()][0]} class="group border-b border-line last:border-0">
             <summary class="flex cursor-pointer items-baseline justify-between py-2 font-mono text-xs text-ink hover:text-accent">
               <span>{dayLabel(day)}</span>
-              <span class="text-ink-muted">{list.length} {list.length === 1 ? "story" : "stories"}</span>
+              <span class="text-ink-muted">{plural(list.length, "change")}</span>
             </summary>
             <ul class="mb-2 flex flex-col border-l border-line pl-3">
               {list.map((s) => (
@@ -312,24 +380,19 @@ function ChangesPage() {
       <Panel title="How this works">
         <div class="flex max-w-3xl flex-col gap-2 font-mono text-xs leading-relaxed text-ink-muted">
           <p>
-            Every 30 minutes the catalogue is fetched and diffed against the last known state. Only what moved is
-            written down: a model appearing, a model quietly disappearing, a price change, a context window change, a
-            capability flag flipping. Nothing is ever deleted.
+            Every half hour, the public price list for every model is compared with the one from half an hour ago.
+            Anything that moved is written down with the time, and nothing is ever deleted. Tiny price wobbles under 3%
+            are folded together so they don't bury the real moves.
           </p>
           <p>
-            The catalogue is OpenRouter's, which lists models and pricing across dozens of providers on one API.
-            OpenRouter keeps no history of its own; this is that history. Price moves under {3}% are called drift and
-            folded up, since a handful of models are priced off an exchange rate and wobble every sweep.
+            A price change can come from the model's maker or from the middleman reselling it. Two independent price
+            lists are checked as well; when one of them recorded the same move, the story gets a{" "}
+            <span class="text-success">✓</span>, meaning the maker changed it. Each model's page shows all three side by side.
           </p>
           <p>
-            Two other catalogues are checked against it: <span class="text-ink">models.dev</span>, a maintained database of
-            first-party listings, and <span class="text-ink">LiteLLM</span>'s price table, which most client libraries bill from.
-            A move that shows up there too is marked <span class="text-success">✓</span>: it came from the provider. One that
-            doesn't may be OpenRouter's own margin or routing. Moves seen only at another catalogue are tagged with where.
-          </p>
-          <p>
-            Provider status is read from each company's public status page. The <Link to="/ecosystem" class="text-accent hover:underline">ecosystem</Link> page
-            tracks adoption signals daily. Click any model for its full history.
+            "Up right now" comes from each company's own status page. The{" "}
+            <Link to="/ecosystem" class="text-accent hover:underline">ecosystem</Link> page tracks what developers are
+            downloading and starring. Click any model for its full history and a price chart.
           </p>
         </div>
       </Panel>
@@ -423,20 +486,25 @@ function ModelsPage() {
  * day would otherwise collapse to one point and the change would vanish from the chart.
  */
 function priceSeries(events: ArchiveEvent[], field: string, current: string, firstSeenAt: string) {
-  const key = (iso: string) => shortTime(iso);
-  const points: { at: string; value: number }[] = [];
+  const points: { iso: string; value: number }[] = [];
   const changes = events.filter((e) => e.kind === "changed" && e.field === field);
+  const nowIso = new Date().toISOString();
   if (changes.length === 0) {
     const v = Number(perMillion(current));
     return [
-      { at: key(firstSeenAt), value: v },
-      { at: key(new Date().toISOString()), value: v },
+      { iso: firstSeenAt, value: v },
+      { iso: nowIso, value: v },
     ];
   }
-  points.push({ at: key(firstSeenAt), value: Number(perMillion(changes[0].oldValue)) });
-  for (const c of changes) points.push({ at: key(c.at), value: Number(perMillion(c.newValue)) });
-  points.push({ at: key(new Date().toISOString()), value: Number(perMillion(current)) });
+  points.push({ iso: firstSeenAt, value: Number(perMillion(changes[0].oldValue)) });
+  for (const c of changes) points.push({ iso: c.at, value: Number(perMillion(c.newValue)) });
+  points.push({ iso: nowIso, value: Number(perMillion(current)) });
   return points;
+}
+
+/** Axis label: date only when the series spans more than a day, time when it is all one day. */
+function chartLabel(iso: string, spanDays: number): string {
+  return spanDays > 1 ? iso.slice(0, 10) : shortTime(iso);
 }
 
 function ModelPage({ modelId }: { modelId: string }) {
@@ -453,23 +521,29 @@ function ModelPage({ modelId }: { modelId: string }) {
 
   const inputSeries = priceSeries(events, "promptPrice", model.promptPrice, model.firstSeenAt);
   const outputSeries = priceSeries(events, "completionPrice", model.completionPrice, model.firstSeenAt);
-  const byDate = new Map<string, { at: string; input?: number; output?: number }>();
-  for (const p of inputSeries) byDate.set(p.at, { ...(byDate.get(p.at) ?? { at: p.at }), input: p.value });
-  for (const p of outputSeries) byDate.set(p.at, { ...(byDate.get(p.at) ?? { at: p.at }), output: p.value });
-  const chart = [...byDate.values()].sort((a, b) => a.at.localeCompare(b.at));
+  const isos = [...inputSeries, ...outputSeries].map((p) => p.iso).sort();
+  const spanDays = (Date.parse(isos[isos.length - 1]) - Date.parse(isos[0])) / DAY;
+  const byDate = new Map<string, { iso: string; at: string; input?: number; output?: number }>();
+  const slot = (iso: string) => {
+    const at = chartLabel(iso, spanDays);
+    return byDate.get(at) ?? { iso, at };
+  };
+  for (const p of inputSeries) byDate.set(chartLabel(p.iso, spanDays), { ...slot(p.iso), input: p.value });
+  for (const p of outputSeries) byDate.set(chartLabel(p.iso, spanDays), { ...slot(p.iso), output: p.value });
+  const chart = [...byDate.values()].sort((a, b) => a.iso.localeCompare(b.iso));
 
   const names = new Map([[model.modelId, model.name]]);
-  const stories = corroborate(foldDrift(groupStories([...events, ...asArchive(cross?.events)], names)), keyOf);
-  const drift = stories.filter((s) => s.kind === "drift").reduce((n, s) => n + (s.folded ?? 1), 0);
+  const stories = corroborate(foldFlapping(foldDrift(groupStories([...events, ...asArchive(cross?.events)], names))), keyOf);
+  const small = stories.filter((s) => s.kind === "drift").reduce((n, s) => n + (s.folded ?? 1), 0);
   const listings = (cross?.listings ?? []).slice().sort((a, b) => a.source.localeCompare(b.source));
 
   return (
     <div class="flex flex-col gap-4">
       <Panel title={`${providerName(model.provider)} · ${modelName(model.modelId, model.name)}`} hint={model.active ? "listed" : "no longer listed"}>
         <dl class="grid gap-x-6 gap-y-1 font-mono text-xs sm:grid-cols-3">
-          <dt class="text-ink-muted">id</dt><dd class="text-ink sm:col-span-2">{model.modelId}{isAlias(model.modelId) ? " · rolling alias, always points at the newest model in its family" : ""}</dd>
-          <dt class="text-ink-muted">context</dt><dd class="text-ink sm:col-span-2">{formatContext(model.contextLength)} · max output {formatContext(model.maxCompletion)}</dd>
-          <dt class="text-ink-muted">price /M</dt><dd class="text-ink sm:col-span-2">in ${perMillion(model.promptPrice)} · out ${perMillion(model.completionPrice)}{model.cacheReadPrice ? ` · cache read $${perMillion(model.cacheReadPrice)}` : ""}</dd>
+          <dt class="text-ink-muted">id</dt><dd class="text-ink sm:col-span-2">{model.modelId}{isAlias(model.modelId) ? " · a rolling name that always points at the newest model in its family" : ""}</dd>
+          <dt class="text-ink-muted">context</dt><dd class="text-ink sm:col-span-2">{formatContext(model.contextLength)} tokens · up to {formatContext(model.maxCompletion)} out</dd>
+          <dt class="text-ink-muted">price</dt><dd class="text-ink sm:col-span-2">{money(model.promptPrice)} in · {money(model.completionPrice)} out{model.cacheReadPrice ? ` · ${money(model.cacheReadPrice)} cached` : ""} per million tokens</dd>
           <dt class="text-ink-muted">modality</dt><dd class="text-ink sm:col-span-2">{model.modality}</dd>
           <dt class="text-ink-muted">listed</dt><dd class="text-ink sm:col-span-2">{model.firstSeenAt.slice(0, 10)} · last seen {ago(model.lastSeenAt)}</dd>
         </dl>
@@ -488,7 +562,7 @@ function ModelPage({ modelId }: { modelId: string }) {
       <Panel title="Other catalogues" hint={listings.length ? "what the provider's own listing says" : `no match for ${key}`}>
         {listings.length === 0 ? (
           <p class="font-mono text-xs text-ink-muted">
-            Neither models.dev nor LiteLLM lists a model this maps to. Either it is only reachable through OpenRouter, or the ids don't line up.
+            The other price lists don't have an entry for this one yet.
           </p>
         ) : (
           <div class="overflow-x-auto">
@@ -528,13 +602,13 @@ function ModelPage({ modelId }: { modelId: string }) {
               </tbody>
             </table>
             <p class="mt-2 font-mono text-xs text-ink-muted">
-              "vs OpenRouter" is OpenRouter's price relative to that listing. A positive gap is what routing through OpenRouter costs on top.
+              "vs OpenRouter" compares the price tracked here with that listing. A positive gap is what the middleman adds on top.
             </p>
           </div>
         )}
       </Panel>
 
-      <Panel title="History" hint={`${stories.length} ${stories.length === 1 ? "story" : "stories"}${drift ? ` · ${drift} drift moves folded` : ""}`}>
+      <Panel title="History" hint={`${stories.length} ${stories.length === 1 ? "change" : "changes"}${small ? ` · ${small} small moves folded` : ""}`}>
         {stories.length === 0 ? (
           <EmptyState title="No changes yet" description="Nothing has moved since it was first seen." />
         ) : (
@@ -544,7 +618,7 @@ function ModelPage({ modelId }: { modelId: string }) {
                 <span class="shrink-0 text-ink-muted">{shortTime(s.at)}</span>
                 <div class="min-w-0 flex-1">
                   <span class="block"><span class={storyTone(s.kind)}>{s.headline}</span><SourceTag story={s} /></span>
-                  {s.detail ? <span class="block text-ink-muted">{s.detail}</span> : null}
+                  {s.detail || s.more.length ? <span class="block text-ink-muted">{[s.detail, ...s.more].filter(Boolean).join(" · ")}</span> : null}
                 </div>
               </li>
             ))}
@@ -646,7 +720,7 @@ export function App() {
         <header class="flex flex-wrap items-baseline justify-between gap-3 border-b border-line pb-3">
           <div>
             <h1 class="font-mono text-lg tracking-[0.3em] text-accent uppercase"><Link to="/" class="hover:text-ink">AI Observatory</Link></h1>
-            <p class="font-mono text-xs text-ink-muted">what AI providers changed, and when</p>
+            <p class="font-mono text-xs text-ink-muted">the changelog AI providers don't publish</p>
             <Freshness />
           </div>
           <Nav />

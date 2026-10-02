@@ -81,6 +81,26 @@ export function perMillion(rawPerToken: string): string {
   return scaled >= 100 ? scaled.toFixed(0) : scaled.toFixed(scaled >= 1 ? 2 : 3);
 }
 
+/** "$0.42", "$1.34", "$13", "$0.004": per-million price the way a pricing page writes it. */
+export function money(rawPerToken: string): string {
+  if (!rawPerToken) return "";
+  const value = Number(rawPerToken) * 1_000_000;
+  if (!Number.isFinite(value)) return "";
+  if (value === 0) return "$0";
+  let text = value >= 100 ? value.toFixed(0) : value >= 10 ? value.toFixed(1) : value >= 1 ? value.toFixed(2) : value.toFixed(3);
+  while (text.includes(".") && text.endsWith("0") && text.split(".")[1].length > 2) text = text.slice(0, -1);
+  if (text.endsWith(".0")) text = text.slice(0, -2);
+  return `$${text}`;
+}
+
+/** Token counts for a before/after pair, with enough precision that a real change never reads as "944K → 944K". */
+export function contextPair(oldValue: string, newValue: string): string {
+  const a = formatContext(oldValue);
+  const b = formatContext(newValue);
+  if (a !== b) return `${a} → ${b}`;
+  return `${Number(oldValue).toLocaleString()} → ${Number(newValue).toLocaleString()}`;
+}
+
 export function formatContext(raw: string): string {
   const value = Number(raw);
   if (!Number.isFinite(value) || value <= 0) return "?";
