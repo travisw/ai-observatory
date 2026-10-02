@@ -559,7 +559,7 @@ function ModelPage({ modelId }: { modelId: string }) {
         />
       </Panel>
 
-      <Panel title="Other catalogues" hint={listings.length ? "what the provider's own listing says" : `no match for ${key}`}>
+      <Panel title="Other price lists" hint={listings.length ? "what the provider's own listing says" : "not listed elsewhere"}>
         {listings.length === 0 ? (
           <p class="font-mono text-xs text-ink-muted">
             The other price lists don't have an entry for this one yet.
