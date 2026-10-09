@@ -527,6 +527,19 @@ async function backfillLitellm() {
 
 export { SOURCES, googleStatus, isoWeek, statuspageIncident, trimEndpoint, trimModel };
 
+/** Walks the whole archive once to seed the records board. Manual, like the backfill. */
+async function rebuildRecords() {
+  let cursor = null;
+  let walked = 0;
+  for (;;) {
+    const result = await callMutation("rebuildRecords", [TOKEN, cursor]);
+    walked += result.walked ?? 0;
+    if (result.done || !result.cursor) break;
+    cursor = result.cursor;
+  }
+  console.log(`records: rebuilt from ${walked} events`);
+}
+
 const JOBS = {
   models: collectModels,
   hosts: collectHosts,
@@ -535,6 +548,7 @@ const JOBS = {
   lifecycle: collectLifecycle,
   daily: collectDaily,
   "backfill-litellm": backfillLitellm,
+  "rebuild-records": rebuildRecords,
 };
 
 /** `all` is the scheduled set; the backfill only ever runs when named. */

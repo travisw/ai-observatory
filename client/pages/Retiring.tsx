@@ -24,8 +24,7 @@ export function RetiringPage() {
   usePageTitle("Retiring soon");
   const data = useQuery<RetiringData>("retiring");
   const models = useQuery<ModelRow[]>("activeModels");
-  const retired = useQuery<ModelRow[]>("retiredModels");
-  const keys = useMemo(() => keyIndex([...(models ?? []), ...(retired ?? [])]), [models, retired]);
+  const keys = useMemo(() => keyIndex(models ?? []), [models]);
   if (isLoading(data)) return <div class="flex flex-col gap-3"><Skeleton class="h-10 w-1/3" /><Skeleton class="h-40 w-full" /></div>;
 
   // One line per model id: the provider's own page outranks the aggregator lists.

@@ -6,6 +6,7 @@ import { Link } from "@spacefast/zero/client";
 import { Sparkline } from "@spacefast/zero/charts";
 import { Icon } from "@spacefast/zero/kit";
 
+import { isAlias } from "../../shared/providers";
 import { SOURCE_LABEL } from "../../shared/sources";
 import type { Story } from "../../shared/stories";
 import { deltaIsGood, storyDelta, storyGlyph, storyTone } from "../lib/stories";
@@ -56,6 +57,7 @@ export function StoryRow({ story, href, spark, relative = false, compact = false
       <div class="min-w-0 flex-1">
         <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5">
           {headline}
+          {!story.source || story.source === "hosts" ? (isAlias(story.modelId) ? <span class="rounded border border-line px-1 text-[11px] text-ink-muted" title="A rolling name that always points at the newest model in its family">alias</span> : null) : null}
           <SourceTag story={story} />
           {story.folded && story.folded > 1 ? <span class="text-[11px] text-ink-muted">{story.folded} moves folded</span> : null}
         </div>

@@ -14,7 +14,7 @@ import { Card, ModelLink, Section } from "../components/bits";
 import { StepChart, type StepSeries } from "../components/StepChart";
 import { StoryRow } from "../components/StoryRow";
 import { UptimeBar } from "../components/UptimeBar";
-import { inputSpark, uptimeDays, uptimePct } from "../lib/series";
+import { inputSpark, uptimeDays } from "../lib/series";
 import { assembleStories, keyIndex, nameIndex, storyHref } from "../lib/stories";
 import { DAY, ago, dayLabel, isLoading, longDate, plural, usePageTitle, useSince } from "../lib/util";
 
@@ -45,7 +45,6 @@ export function ProviderPage() {
   const active = models.filter((m) => m.active);
   const retired = models.filter((m) => !m.active);
   const days = uptimeDays(data.status, data.statusEvents, data.incidents, 90);
-  const pct = uptimePct(days);
   const indicator = data.status?.indicator ?? "";
   const stateWord = indicator === "none" ? "up" : indicator === "minor" ? "degraded" : indicator === "major" || indicator === "critical" ? "outage" : indicator === "unreachable" ? "status page unreachable" : "no status page tracked";
   const stateClass = indicator === "none" ? "text-success" : indicator === "minor" ? "text-warning" : indicator === "major" || indicator === "critical" ? "text-danger" : "text-ink-muted";

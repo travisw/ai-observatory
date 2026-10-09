@@ -4,8 +4,7 @@
  */
 import { useMemo, useState } from "preact/hooks";
 import { Link, useNavigate, useParams, useQuery } from "@spacefast/zero/client";
-import { BarChart } from "@spacefast/zero/charts";
-import { Accordion, AccordionItem, Badge, Button, EmptyState, Icon, Skeleton, Tabs, TabsList, TabsTrigger } from "@spacefast/zero/kit";
+import { Accordion, AccordionItem, Badge, Button, CodeBlock, EmptyState, Icon, Skeleton, Tabs, TabsList, TabsTrigger } from "@spacefast/zero/kit";
 
 import { formatContext, money, parseTiers, perMillion } from "../../shared/model";
 import { isAlias, modelName, providerName } from "../../shared/providers";
@@ -119,9 +118,15 @@ export function ModelPage() {
   const tiers = parseTiers(model.tiers);
   const key = canonicalKey(model.provider, model.modelId);
   const listings = data.listings.slice().sort((a, b) => a.source.localeCompare(b.source));
-  const markup = listings
-    .filter((l) => l.promptPrice && model.promptPrice)
-    .map((l) => ({ at: SOURCE_LABEL[l.source]?.split("'")[0] ?? l.source, gap: Math.round((pctChange(l.promptPrice, model.promptPrice) ?? 0) * 10) / 10 }));
+  // Input price here and at each list, as bars against the dearest of them. Omitted when every
+  // list agrees to the cent, since a row of identical bars says nothing.
+  const priceBars = [
+    { at: "here (OpenRouter)", price: Number(model.promptPrice) * 1e6 },
+    ...listings.filter((l) => l.promptPrice).map((l) => ({ at: SOURCE_LABEL[l.source]?.split("'")[0] ?? l.source, price: Number(l.promptPrice) * 1e6 })),
+  ].filter((b) => Number.isFinite(b.price) && b.price > 0);
+  const barMax = Math.max(0, ...priceBars.map((b) => b.price));
+  const barsDiffer = new Set(priceBars.map((b) => b.price.toFixed(4))).size > 1;
+  const badgeMarkdown = `![input price](https://ai-observatory.view.fast/badge.svg?model=${model.modelId}&metric=input)`;
   const small = stories.filter((s) => s.kind === "drift");
   const big = stories.filter((s) => s.kind !== "drift");
   const targetId = model.aliasTarget ? (tracked.get(canonicalKey(model.provider, model.aliasTarget)) ?? model.aliasTarget) : "";
@@ -330,10 +335,20 @@ export function ModelPage() {
                   </tbody>
                 </table>
               </div>
-              {markup.length ? (
-                <div>
-                  <p class="mb-1 text-xs text-ink-muted">Input price here, as a percentage above or below each list. Above zero is what the middleman adds.</p>
-                  <BarChart data={markup.map((m) => ({ at: m.at, markup: Math.max(0, m.gap) }))} x="at" series={[{ key: "markup", label: "% above list" }]} height={120} formatValue={(v) => `${v.toFixed(0)}%`} />
+              {barsDiffer && barMax > 0 ? (
+                <div class="flex flex-col gap-1.5">
+                  <p class="text-xs text-ink-muted">Input price per million tokens, here and at each list. A longer bar here than at the maker's list is the middleman's margin.</p>
+                  <ul class="flex flex-col gap-1">
+                    {priceBars.map((b) => (
+                      <li key={b.at} class="grid items-center gap-3 text-xs sm:grid-cols-[9rem_1fr_5rem]">
+                        <span class="truncate text-ink-muted">{b.at}</span>
+                        <div class="h-2 w-full overflow-hidden rounded-full bg-line" role="img" aria-label={`${b.at}: $${b.price.toFixed(3)} per million`}>
+                          <div class={`h-full ${b.at.startsWith("here") ? "bg-accent" : "bg-ink-muted"}`} style={{ width: `${Math.max(2, (b.price / barMax) * 100)}%` }} />
+                        </div>
+                        <span class="font-mono tabular-nums text-ink sm:text-right">${b.price >= 10 ? b.price.toFixed(1) : b.price.toFixed(2)}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               ) : null}
             </div>
@@ -402,11 +417,21 @@ export function ModelPage() {
         </Section>
       ) : null}
 
-      <p class="text-xs text-ink-muted">
-        Badge for your README: <code class="font-mono">{`![input price](https://ai-observatory.view.fast/badge.svg?model=${model.modelId}&metric=input)`}</code>
-        {" · "}<Link to="/api" class="text-accent hover:underline">all badges and feeds</Link>
-        {" · "}<a href={`/feed.xml?model=${encodeURIComponent(model.modelId)}`} class="text-accent hover:underline">RSS for this model</a>
-      </p>
+      <Section title="Take it with you" hint="a badge for a README, a feed for a reader">
+        <div class="flex flex-col gap-2">
+          <div class="flex flex-wrap items-center gap-3">
+            <img src={`/badge.svg?model=${encodeURIComponent(model.modelId)}&metric=input`} alt={`input price badge for ${model.modelId}`} height={20} />
+            <img src={`/badge.svg?model=${encodeURIComponent(model.modelId)}&metric=changed`} alt={`last change badge for ${model.modelId}`} height={20} />
+            <CopyButton text={badgeMarkdown} label="copy markdown" />
+          </div>
+          <CodeBlock language="markdown" code={badgeMarkdown} />
+          <p class="text-xs text-ink-muted">
+            <Link to="/api" class="text-accent hover:underline">All badges, feeds and JSON</Link>
+            {" · "}<a href={`/feed.xml?model=${encodeURIComponent(model.modelId)}`} class="text-accent hover:underline">RSS for this model</a>
+            {" · "}<a href={`/api/model.json?id=${encodeURIComponent(model.modelId)}`} class="text-accent hover:underline">JSON</a>
+          </p>
+        </div>
+      </Section>
     </div>
   );
 }

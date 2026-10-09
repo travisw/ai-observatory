@@ -34,8 +34,7 @@ export function RecordsPage() {
   usePageTitle("Records");
   const records = useQuery<RecordRow[]>("records");
   const models = useQuery<ModelRow[]>("activeModels");
-  const retired = useQuery<ModelRow[]>("retiredModels");
-  const names = useMemo(() => nameIndex([...(models ?? []), ...(retired ?? [])]), [models, retired]);
+  const names = useMemo(() => nameIndex(models ?? []), [models]);
   if (isLoading(records) && isLoading(models)) return <div class="flex flex-col gap-3"><Skeleton class="h-10 w-1/3" /><Skeleton class="h-40 w-full" /></div>;
   const byKey = new Map((records ?? []).map((r) => [r.key, r]));
   const rows = ORDER.map((k) => byKey.get(k)).filter((r): r is RecordRow => Boolean(r));

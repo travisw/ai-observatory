@@ -143,12 +143,14 @@ export function shortTime(iso: string): string {
   return `${iso.slice(5, 10)} ${iso.slice(11, 16)}`;
 }
 
-/** "2026-09-09T14:03:00.000Z" to "9 Sep 2026". */
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "2026-09-09T14:03:00.000Z" to "9 Sep 2026". Hand-formatted so every runtime agrees. */
 export function longDate(iso: string): string {
   if (!iso || iso.length < 10) return iso || "";
   const d = new Date(iso.length === 10 ? `${iso}T00:00:00Z` : iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 }
 
 /** Whole days between two ISO stamps (either order), rounded down. */

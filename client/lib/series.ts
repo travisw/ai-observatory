@@ -119,13 +119,13 @@ export function uptimeDays(
       out.push({ day, state: "none" });
       continue;
     }
-    // Indicator at the end of the day, then every transition inside the day.
-    let state: DayState = "none";
+    // The indicator at the end of the day, found by walking the transitions backwards from now.
+    // An unreachable or unknown reading is not a reading: the day stays "no record".
     let indicator = status?.indicator ?? "";
     for (const t of own) {
       if (Date.parse(t.at) > to) indicator = t.oldIndicator;
     }
-    if (indicator) state = indicatorState(indicator);
+    let state: DayState = indicatorState(indicator);
     for (const t of own) {
       const at = Date.parse(t.at);
       if (at >= from && at < to) state = worse(state, worse(indicatorState(t.newIndicator), indicatorState(t.oldIndicator)));
@@ -137,15 +137,18 @@ export function uptimeDays(
         state = worse(state, inc.impact === "major" || inc.impact === "critical" ? "down" : inc.impact === "none" ? "up" : "degraded");
       }
     }
-    if (state === "none" && from >= earliest) state = "up";
     out.push({ day, state });
   }
   return out;
 }
 
-export function uptimePct(days: { state: DayState }[]): number | null {
+/** Days with a reading, and how many of those had an incident of any size. */
+export function uptimeSummary(days: { state: DayState }[]): { recorded: number; incidentDays: number; downDays: number } {
   const known = days.filter((d) => d.state !== "none");
-  if (known.length === 0) return null;
-  const good = known.filter((d) => d.state === "up").length;
-  return (good / known.length) * 100;
+  return {
+    recorded: known.length,
+    incidentDays: known.filter((d) => d.state !== "up").length,
+    downDays: known.filter((d) => d.state === "down").length,
+  };
 }
+

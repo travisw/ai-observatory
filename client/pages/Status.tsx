@@ -8,7 +8,7 @@ import { providerName } from "../../shared/providers";
 import type { ModelRow, StatusPageData } from "../../shared/types";
 import { Card, ProviderLink, Section } from "../components/bits";
 import { UptimeBar } from "../components/UptimeBar";
-import { uptimeDays, uptimePct } from "../lib/series";
+import { uptimeDays, uptimeSummary } from "../lib/series";
 import { ago, dayLabel, isLoading, plural, providerHref, usePageTitle } from "../lib/util";
 
 export function StatusPage() {
@@ -37,7 +37,7 @@ export function StatusPage() {
           <ul class="divide-y divide-line">
             {data.statuses.map((s) => {
               const days = uptimeDays(s, data.statusEvents.filter((e) => e.provider === s.provider), data.incidents.filter((i) => i.provider === s.provider), 90);
-              const pct = uptimePct(days);
+              const sum = uptimeSummary(days);
               const tone = s.indicator === "none" ? "success" : s.indicator === "minor" ? "warning" : s.indicator === "major" || s.indicator === "critical" ? "danger" : "neutral";
               const word = s.indicator === "none" ? "up" : s.indicator === "minor" ? "degraded" : s.indicator === "major" || s.indicator === "critical" ? "outage" : s.indicator === "unreachable" ? "status page unreachable" : s.indicator;
               return (
@@ -49,7 +49,7 @@ export function StatusPage() {
                   <UptimeBar days={days} label={providerName(s.provider)} />
                   <div class="flex items-center gap-2 md:justify-end">
                     <Badge tone={tone}>{word}</Badge>
-                    {pct !== null ? <span class="font-mono text-xs tabular-nums text-ink-muted">{pct.toFixed(1)}%</span> : null}
+                    {sum.recorded ? <span class="font-mono text-xs tabular-nums text-ink-muted" title={`${sum.incidentDays} incident days of ${sum.recorded} recorded`}>{sum.incidentDays}/{sum.recorded}</span> : null}
                   </div>
                 </li>
               );
@@ -57,7 +57,7 @@ export function StatusPage() {
           </ul>
         </Card>
         <p class="text-xs text-ink-muted">
-          Only providers with a machine-readable status page are checked. Hollow bars mean no record for that day, never an assumption of uptime.
+          Only providers with a machine-readable status page are checked. Hollow bars mean no record for that day, never an assumption of uptime. Amber is a degraded day, red a day with an outage; the count beside each badge is incident days out of recorded days.
         </p>
       </Section>
 

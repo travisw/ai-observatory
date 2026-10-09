@@ -1304,6 +1304,13 @@ export default capsule({
       }
     ),
 
+    /** One page of the records rebuild. Call with the returned cursor until `done`. */
+    rebuildRecords: mutation(async (ctx, token: string, cursor: string | null) => {
+      if (!allowed(ctx, token)) return { ok: false, error: "unauthorized" };
+      const result = await rebuildRecordsPage(ctx as unknown as Ctx, cursor ?? null);
+      return { ok: true, ...result };
+    }),
+
     /** The day's market summary, computed from the current catalogue. Idempotent per date. */
     rollupDaily: mutation(async (ctx, token: string, date?: string) => {
       if (!allowed(ctx, token)) return { ok: false, error: "unauthorized" };
@@ -1793,8 +1800,79 @@ async function noteRecords(ctx: Ctx, model: TrackedModel, field: string, before:
     await bumpRecord(ctx, "cheapest-listed-ever", { ...who, value: after, detail: `${money(after)} per million input` }, (a, b) => a < b);
     const row = await ctx.db.models.withIndex("by_model", (range: any) => range.eq("modelId", model.modelId)).first();
     const count = Number(row?.changeCount ?? 0) + 1;
-    await bumpRecord(ctx, "most-repriced", { ...who, value: String(count), detail: `${count} recorded changes` }, (a, b) => a > b);
+    await bumpRecord(ctx, "most-repriced", { ...who, value: String(count), detail: `${count} recorded ${count === 1 ? "change" : "changes"}` }, (a, b) => a > b);
   }
+}
+
+/**
+ * Rebuilds the records board from the whole archive, one page of events per call. Needed once
+ * after the board was introduced; records are kept incrementally from then on. Returns the
+ * cursor to pass back in, and `done` when the archive has been walked.
+ */
+async function rebuildRecordsPage(ctx: Ctx, cursor: string | null) {
+  if (!cursor) {
+    const existing = await ctx.db.records.withIndex("by_key").take(50);
+    for (const row of existing) await ctx.db.records.delete(row.id);
+  }
+  const models = await ctx.db.models.withIndex("by_model").take(1000);
+  const byId = new Map<string, any>(models.map((m) => [String(m.modelId), m]));
+  const counts = new Map<string, number>();
+  const page = await ctx.db.events.withIndex("by_at").order("asc").paginate({ cursor, numItems: 500 });
+  for (const e of page.page) {
+    const row = byId.get(String(e.modelId));
+    if (!row || isAlias(String(e.modelId))) continue;
+    const model = { modelId: String(e.modelId), provider: String(e.provider) } as TrackedModel;
+    if (e.kind === "added") {
+      if (Number(e.at < String(row.firstSeenAt) ? 0 : 1) && Number(row.promptPrice) > 0 && String(row.changeCount) === "0") {
+        await noteCheapestListed(ctx, { ...model, promptPrice: String(row.promptPrice) } as TrackedModel, String(e.at));
+      }
+      continue;
+    }
+    if (e.kind === "removed") {
+      const lived = daysBetween(String(row.firstSeenAt ?? e.at), String(e.at));
+      if (lived >= 1) {
+        await bumpRecord(ctx, "shortest-lived", { modelId: model.modelId, provider: model.provider, value: String(lived), at: String(e.at), detail: `listed ${longDate(String(row.firstSeenAt))}, removed ${longDate(String(e.at))}` }, (a, b) => a < b);
+      }
+      continue;
+    }
+    if (e.kind !== "changed") continue;
+    if (e.field === "promptPrice" || e.field === "completionPrice" || e.field === "contextLength") {
+      const x = Number(e.oldValue);
+      const y = Number(e.newValue);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      const who = { modelId: model.modelId, provider: model.provider, at: String(e.at) };
+      if (e.field === "contextLength") {
+        if (y > x) await bumpRecord(ctx, "largest-context-jump", { ...who, value: String(y), detail: `${formatContext(String(e.oldValue))} → ${formatContext(String(e.newValue))}` }, (a, b) => a > b);
+        continue;
+      }
+      if (x <= 0 || y <= 0) continue;
+      const move = ((y - x) / x) * 100;
+      if (Math.abs(move) < 3) continue;
+      const side = e.field === "promptPrice" ? "input" : "output";
+      const detail = `${money(String(e.oldValue))} → ${money(String(e.newValue))} per million`;
+      if (move < 0) await bumpRecord(ctx, `biggest-cut-${side}`, { ...who, value: String(Math.abs(move).toFixed(1)), detail }, (a, b) => a > b);
+      else await bumpRecord(ctx, `biggest-raise-${side}`, { ...who, value: String(move.toFixed(1)), detail }, (a, b) => a > b);
+      if (e.field === "promptPrice") {
+        await bumpRecord(ctx, "cheapest-listed-ever", { ...who, value: String(e.newValue), detail: `${money(String(e.newValue))} per million input` }, (a, b) => a < b);
+        const n = (counts.get(model.modelId) ?? 0) + 1;
+        counts.set(model.modelId, n);
+      }
+    }
+  }
+  // Most repriced is a property of the whole archive; the per-model counters on the rows are
+  // authoritative once every row has been upgraded, so read them at the end of the walk.
+  if (page.isDone) {
+    let best: any = null;
+    for (const m of models) {
+      if (isAlias(String(m.modelId))) continue;
+      if (!best || Number(m.changeCount) > Number(best.changeCount)) best = m;
+    }
+    if (best && Number(best.changeCount) > 0) {
+      const count = Number(best.changeCount);
+      await bumpRecord(ctx, "most-repriced", { modelId: String(best.modelId), provider: String(best.provider), value: String(count), at: String(best.lastChangedAt || now()), detail: `${count} recorded ${count === 1 ? "change" : "changes"}` }, (a, b) => a > b);
+    }
+  }
+  return { cursor: page.continueCursor, done: page.isDone, walked: page.page.length };
 }
 
 async function noteCheapestListed(ctx: Ctx, model: TrackedModel, at: string) {

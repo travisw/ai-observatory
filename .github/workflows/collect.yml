@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       job:
-        description: "sweep (loop for ~6h), once (single sweep of everything), daily, or backfill (replay LiteLLM history, run once)"
+        description: "sweep (loop for ~6h), once (single sweep of everything), daily, backfill (replay LiteLLM history, run once), or rebuild-records (run once)"
         default: once
 
 jobs:
@@ -41,6 +41,10 @@ jobs:
           fi
           if [ "$JOB" = "backfill" ]; then
             node collector/fetch-and-post.mjs backfill-litellm
+            exit 0
+          fi
+          if [ "$JOB" = "rebuild-records" ]; then
+            node collector/fetch-and-post.mjs rebuild-records
             exit 0
           fi
           if [ "$JOB" = "once" ]; then

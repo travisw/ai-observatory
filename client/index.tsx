@@ -8,6 +8,7 @@ import { EmptyState, Icon, Kbd } from "@spacefast/zero/kit";
 
 import { Palette, type PaletteMode } from "./components/Palette";
 import { ShortcutSheet } from "./components/ShortcutSheet";
+import { clearFreshness, useProvidedFreshness } from "./lib/freshness";
 import { PALETTE_EVENT } from "./lib/palette";
 import { useWatchlist } from "./lib/watch";
 import { ago, prefersReducedMotion } from "./lib/util";
@@ -46,9 +47,7 @@ const MORE = [
 ];
 
 /** "checked 12m ago", flashing once when a new sweep lands. */
-function Freshness() {
-  const latest = useQuery<Record<string, string>>("freshness");
-  const models = Array.isArray(latest) ? undefined : latest?.models;
+function FreshnessStamp({ models }: { models: string | undefined }) {
   const [pulse, setPulse] = useState(false);
   const previous = useRef<string | undefined>(undefined);
   useEffect(() => {
@@ -67,6 +66,17 @@ function Freshness() {
       {stale ? " · overdue" : ""}
     </span>
   );
+}
+
+/** Subscribes to the freshness query itself: for pages that do not already load it. */
+function FreshnessLive() {
+  const latest = useQuery<Record<string, string>>("freshness");
+  return <FreshnessStamp models={Array.isArray(latest) ? undefined : latest?.models} />;
+}
+
+/** Takes the stamp from the page's own data: the home page loads it inside its one subscription. */
+function FreshnessProvided() {
+  return <FreshnessStamp models={useProvidedFreshness()} />;
 }
 
 function Nav(props: { pathname: string; onSearch: () => void; watching: number }) {
@@ -169,7 +179,7 @@ function Shell() {
   }, [palette, sheet, navigate]);
 
   // Scroll to the top on every route change, since the browser only does this for full loads.
-  useEffect(() => { window.scrollTo(0, 0); }, [location.pathname]);
+  useEffect(() => { window.scrollTo(0, 0); if (location.pathname !== "/") clearFreshness(); }, [location.pathname]);
 
   return (
     <div class="min-h-dvh bg-canvas text-ink">
@@ -181,7 +191,7 @@ function Shell() {
               <span class="mr-1.5 inline-block size-2.5 rounded-full bg-accent align-middle" aria-hidden="true" />
               AI Observatory
             </Link>
-            <Freshness />
+            {location.pathname === "/" ? <FreshnessProvided /> : <FreshnessLive />}
           </div>
           <Nav pathname={location.pathname} onSearch={() => setPalette({ kind: "navigate" })} watching={watchlist.length} />
         </div>

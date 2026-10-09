@@ -9,21 +9,14 @@ import { EmptyState, Skeleton } from "@spacefast/zero/kit";
 import { money } from "../../shared/model";
 import { isAlias, modelName, providerName } from "../../shared/providers";
 import { headlines, tally, type Story } from "../../shared/stories";
-import type {
-  ArchiveEvent,
-  HostEvent,
-  LifecycleEvent,
-  ModelRow,
-  RecordRow,
-  SourceEventRow,
-  StatusPageData,
-} from "../../shared/types";
+import type { ArchiveEvent, HomePageData, ModelRow } from "../../shared/types";
 import { Card, Chip, DeltaChip, ModelLink, ProviderLink, Section } from "../components/bits";
 import { StoryRow } from "../components/StoryRow";
 import { UptimeBar } from "../components/UptimeBar";
-import { inputSpark, stepSeries, uptimeDays, uptimePct } from "../lib/series";
+import { inputSpark, uptimeDays, uptimeSummary } from "../lib/series";
 import { KIND_GROUPS, assembleStories, keyIndex, kindInGroup, nameIndex, storyDelta, storyHref } from "../lib/stories";
-import { DAY, ago, dayLabel, isLoading, longDate, modelHref, pctChange, plural, readStorage, useCountUp, usePageTitle, useSearchParams, useSince, writeStorage } from "../lib/util";
+import { provideFreshness } from "../lib/freshness";
+import { DAY, ago, dayLabel, isLoading, longDate, pctChange, plural, readStorage, useCountUp, usePageTitle, useSearchParams, writeStorage } from "../lib/util";
 import { matchesWatch, useWatchlist } from "../lib/watch";
 
 const LAST_VISIT = "observatory.lastVisit";
@@ -79,16 +72,19 @@ export function HomePage() {
   const kindFilter = params.get("kind") ?? "";
   const watchOnly = params.get("watch") === "1";
 
-  const models = useQuery<ModelRow[]>("activeModels");
-  const status = useQuery<StatusPageData>("statusPage");
-  const since90 = useSince(90);
-  const events = useQuery<ArchiveEvent[]>("eventsSince", since90);
-  const cheapest = useQuery<ModelRow[]>("cheapestEver");
-  const records = useQuery<RecordRow[]>("records");
-  const hostEvents = useQuery<HostEvent[]>("recentHostEvents");
-  const lifecycleEvents = useQuery<LifecycleEvent[]>("recentLifecycleEvents");
-  const sourceEvents = useQuery<SourceEventRow[]>("recentSourceEvents");
-  const sizes = useQuery<{ at: string; listed: number }[]>("sweepSizes");
+  // One subscription for the whole page: a burst of a dozen parallel requests gets rate-limited.
+  const page = useQuery<HomePageData>("homePage");
+  const ready = !isLoading(page);
+  const models = ready ? page.models : undefined;
+  const events = ready ? page.events : undefined;
+  const cheapest = ready ? page.cheapest : undefined;
+  const records = ready ? page.records : undefined;
+  const hostEvents = ready ? page.hostEvents : undefined;
+  const lifecycleEvents = ready ? page.lifecycleEvents : undefined;
+  const sourceEvents = ready ? page.sourceEvents : undefined;
+  const sizes = ready ? page.sweeps : undefined;
+  const status = ready ? { statuses: page.statuses, statusEvents: page.statusEvents, incidents: page.incidents } : null;
+  useEffect(() => { if (ready) provideFreshness(page.freshness.models); }, [ready, page]);
   const [watchlist] = useWatchlist();
 
   // "New since your last visit": read the previous stamp once, then move it to now.
@@ -122,7 +118,7 @@ export function HomePage() {
   const providers = new Set(active.map((m) => m.provider.replace(/^~/, "")));
   const today = new Date().toISOString().slice(0, 10);
   const changesToday = stories.filter((s) => s.at.slice(0, 10) === today && s.kind !== "drift").length;
-  const statuses = isLoading(status) ? [] : status.statuses;
+  const statuses = status ? status.statuses : [];
   const notUp = statuses.filter((s) => s.indicator !== "none");
   const trend = (sizes ?? []).map((s) => s.listed);
   const weekStart = (sizes ?? []).find((s) => s.at >= weekAgo);
@@ -137,8 +133,10 @@ export function HomePage() {
   const lastRaise = (events ?? []).find((e) => e.kind === "changed" && (e.field === "promptPrice" || e.field === "completionPrice") && Number(e.newValue) > Number(e.oldValue) * 1.03 && !isAlias(e.modelId));
   const lastRemoval = (events ?? []).find((e) => e.kind === "removed" && !isAlias(e.modelId));
   if (events && events.length) {
-    facts.push(lastRaise ? `${Math.floor((Date.now() - Date.parse(lastRaise.at)) / DAY)} days since a price went up anywhere` : "no price has gone up in 90 days");
-    facts.push(lastRemoval ? `${Math.floor((Date.now() - Date.parse(lastRemoval.at)) / DAY)} days since a model was removed` : "no model has been removed in 90 days");
+    const sinceRaise = lastRaise ? Math.floor((Date.now() - Date.parse(lastRaise.at)) / DAY) : null;
+    const sinceRemoval = lastRemoval ? Math.floor((Date.now() - Date.parse(lastRemoval.at)) / DAY) : null;
+    facts.push(sinceRaise === null ? "no price has gone up in 90 days" : sinceRaise === 0 ? "a price went up today" : `${plural(sinceRaise, "day")} since a price went up anywhere`);
+    facts.push(sinceRemoval === null ? "no model has been removed in 90 days" : sinceRemoval === 0 ? "a model was removed today" : `${plural(sinceRemoval, "day")} since a model was removed`);
   }
   const longest = (records ?? []).find((r) => r.key === "longest-unchanged");
   if (longest) facts.push(`longest unchanged price: ${modelName(longest.modelId, names.get(longest.modelId))}, ${longest.value} days`);
@@ -153,7 +151,7 @@ export function HomePage() {
   }
   let dividerPlaced = !lastVisit;
   const windowLabel = lead.windowHours === 24 ? "last 24 hours" : lead.windowHours === 72 ? "last 3 days" : lead.windowHours === 168 ? "last 7 days" : lead.windowHours === 720 ? "last 30 days" : "all time";
-  const loading = isLoading(models) && isLoading(events);
+  const loading = !ready;
 
   return (
     <div class="flex flex-col gap-10">
@@ -287,8 +285,8 @@ export function HomePage() {
           ) : (
             <ul class="divide-y divide-line">
               {statuses.map((s) => {
-                const days = uptimeDays(s, status.statusEvents.filter((e) => e.provider === s.provider), status.incidents.filter((i) => i.provider === s.provider), 90);
-                const pct = uptimePct(days);
+                const days = uptimeDays(s, status!.statusEvents.filter((e) => e.provider === s.provider), status!.incidents.filter((i) => i.provider === s.provider), 90);
+                const sum = uptimeSummary(days);
                 return (
                   <li key={s.id} class="grid items-center gap-x-4 gap-y-1 px-4 py-2 sm:grid-cols-[10rem_1fr_6rem]">
                     <span class="flex items-center gap-2 text-sm">
@@ -297,7 +295,7 @@ export function HomePage() {
                     </span>
                     <UptimeBar days={days} label={providerName(s.provider)} height={16} />
                     <span class={`text-right font-mono text-xs ${indicatorClass(s.indicator)}`} title={s.description || undefined}>
-                      {indicatorWord(s.indicator)}{pct !== null ? <span class="block text-[11px] text-ink-muted">{pct.toFixed(1)}% · 90d</span> : null}
+                      {indicatorWord(s.indicator)}{sum.recorded ? <span class="block text-[11px] text-ink-muted">{sum.incidentDays} incident {sum.incidentDays === 1 ? "day" : "days"} of {sum.recorded}</span> : null}
                     </span>
                   </li>
                 );

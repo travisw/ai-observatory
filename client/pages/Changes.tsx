@@ -53,14 +53,13 @@ export function ChangesPage() {
   const pages = Math.max(1, Math.min(20, Number(params.get("page") ?? "1") || 1));
 
   const models = useQuery<ModelRow[]>("activeModels");
-  const retired = useQuery<ModelRow[]>("retiredModels");
   const { events, last, loaded } = usePages(provider, pages);
   const hostEvents = useQuery<HostEvent[]>("recentHostEvents");
   const lifecycleEvents = useQuery<LifecycleEvent[]>("recentLifecycleEvents");
   const sourceEvents = useQuery<SourceEventRow[]>("recentSourceEvents");
   const [watchlist] = useWatchlist();
 
-  const all = useMemo(() => [...(models ?? []), ...(retired ?? [])], [models, retired]);
+  const all = models ?? [];
   const names = useMemo(() => nameIndex(all), [all]);
   const keys = useMemo(() => keyIndex(all), [all]);
   const providers = useMemo(() => [...new Set((models ?? []).map((m) => m.provider.replace(/^~/, "")))].sort((a, b) => providerName(a).localeCompare(providerName(b))), [models]);
