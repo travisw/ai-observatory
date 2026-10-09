@@ -30,10 +30,10 @@ export function LogSection(props: { title: string; hint?: ComponentChildren; act
 /** A ruled log line: a narrow left cell, the sentence, a right-aligned mono readout. */
 export function LogLine(props: { left?: ComponentChildren; children: ComponentChildren; right?: ComponentChildren; dim?: boolean; class?: string }) {
   return (
-    <li class={`grid grid-cols-[3.5rem_1fr_auto] items-baseline gap-x-3 border-b border-dotted border-line py-1.5 last:border-0 ${props.dim ? "opacity-60" : ""} ${props.class ?? ""}`} data-feed-row>
-      <span class="font-mono text-xs tabular-nums text-ink-muted">{props.left}</span>
-      <span class="min-w-0 text-[15px] text-ink">{props.children}</span>
-      <span class="font-mono text-xs tabular-nums">{props.right}</span>
+    <li class={`grid grid-cols-[3.5rem_minmax(0,1fr)_auto] items-baseline gap-x-3 border-b border-dotted border-line py-1.5 last:border-0 ${props.dim ? "opacity-60" : ""} ${props.class ?? ""}`} data-feed-row>
+      <span class="min-w-0 font-mono text-xs tabular-nums text-ink-muted">{props.left}</span>
+      <span class="min-w-0 break-words text-[15px] text-ink">{props.children}</span>
+      <span class="max-w-[40vw] min-w-0 break-words font-mono text-xs tabular-nums sm:max-w-none">{props.right}</span>
     </li>
   );
 }
@@ -91,7 +91,7 @@ export function Stencil(props: { active?: boolean; href?: string; onClick?: () =
 /** The brass plaque: a footnote or a takeaway, lit from behind. */
 export function Plaque(props: { children: ComponentChildren; class?: string }) {
   return (
-    <div class={`rounded-sm border border-accent/40 bg-accent/10 px-4 py-3 text-sm text-ink shadow-[inset_0_1px_0_rgba(255,176,0,0.25)] ${props.class ?? ""}`}>
+    <div class={`min-w-0 max-w-full break-words rounded-sm border border-accent/40 bg-accent/10 px-4 py-3 text-sm text-ink shadow-[inset_0_1px_0_rgba(255,176,0,0.25)] ${props.class ?? ""}`}>
       {props.children}
     </div>
   );
@@ -109,8 +109,8 @@ export function Readout(props: { label: string; value: string; width: number; to
       {props.sub ? <span class="text-xs text-ink-muted">{props.sub}</span> : null}
     </>
   );
-  if (props.href) return <Link to={props.href} class="flex flex-col gap-1.5" aria-label={props.ariaLabel}>{body}</Link>;
-  return <div class="flex flex-col gap-1.5" aria-label={props.ariaLabel}>{body}</div>;
+  if (props.href) return <Link to={props.href} class="flex max-w-full flex-col gap-1.5 overflow-x-auto" aria-label={props.ariaLabel}>{body}</Link>;
+  return <div class="flex max-w-full flex-col gap-1.5 overflow-x-auto" aria-label={props.ariaLabel}>{body}</div>;
 }
 
 /** A sign-styled select, for the few places a dropdown is the right control. */
@@ -147,7 +147,7 @@ export function BoardSkeleton(props: { rows?: number; cells?: number; size?: Fla
   const rows = props.rows ?? 4;
   const cells = props.cells ?? 48;
   return (
-    <div class="flex flex-col" aria-busy="true" aria-label="Loading">
+    <div class="flex max-w-full flex-col overflow-hidden" aria-busy="true" aria-label="Loading">
       {Array.from({ length: rows }, (_, i) => (
         <div key={i} class="border-b border-line/70 px-3 py-1.5 last:border-0">
           <span class="block rounded-[2px] bg-flap" style={{ width: `${columnWidth(cells, props.size ?? "md")}px`, height: props.size === "sm" ? "18px" : props.size === "lg" ? "38px" : "26px" }} />
@@ -179,9 +179,9 @@ export function BoardEmpty(props: { children: string }) {
 /** A page heading in the hall's voice. */
 export function Marquee(props: { title: string; children?: ComponentChildren; action?: ComponentChildren }) {
   return (
-    <div class="flex flex-wrap items-end justify-between gap-4">
-      <div class="flex max-w-3xl flex-col gap-2">
-        <h1 class="text-3xl font-bold uppercase tracking-[0.3em] text-ink [text-shadow:0_0_18px_rgba(243,233,207,0.3)]">{props.title}</h1>
+    <div class="flex min-w-0 max-w-full flex-wrap items-end justify-between gap-4">
+      <div class="flex min-w-0 max-w-3xl flex-col gap-2">
+        <h1 class="break-words text-2xl font-bold uppercase tracking-[0.25em] text-ink [text-shadow:0_0_18px_rgba(243,233,207,0.3)] sm:text-3xl sm:tracking-[0.3em]">{props.title}</h1>
         {props.children ? <div class="text-sm text-ink-muted">{props.children}</div> : null}
       </div>
       {props.action ? <div class="flex flex-wrap items-center gap-1.5">{props.action}</div> : null}

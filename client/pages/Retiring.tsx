@@ -83,8 +83,8 @@ export function RetiringPage() {
       </Marquee>
 
       {next ? (
-        <div class="flex flex-wrap items-center gap-x-8 gap-y-3">
-          <div class="flex flex-col gap-1.5">
+        <div class="flex max-w-full flex-wrap items-center gap-x-8 gap-y-3">
+          <div class="flex max-w-full flex-col gap-1.5 overflow-x-auto">
             <span class="text-[11px] font-semibold uppercase tracking-[0.3em] text-ink-muted">Next departure</span>
             <FlapText text={next.model} width={Math.min(26, Math.max(8, next.model.length))} size="lg" />
           </div>

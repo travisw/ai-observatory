@@ -200,14 +200,14 @@ function Shell() {
   useEffect(() => { window.scrollTo(0, 0); if (location.pathname !== "/") clearFreshness(); }, [location.pathname]);
 
   return (
-    <div class="min-h-dvh bg-canvas text-ink" style={{ fontFamily: BOARD_FONT }}>
+    <div class="min-h-dvh max-w-full overflow-x-hidden bg-canvas text-ink" style={{ fontFamily: BOARD_FONT }}>
       <FlapStyles />
       <a href="#main" class="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-accent focus:px-3 focus:py-1 focus:text-canvas">Skip to content</a>
       <header class="border-b-2 border-accent/60 bg-canvas shadow-[0_8px_30px_rgba(0,0,0,0.6)]">
         <div class="mx-auto flex w-full max-w-[1180px] flex-wrap items-center justify-between gap-x-6 gap-y-3 px-4 py-3 sm:px-6">
           <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
             <Link to="/" class="group inline-flex flex-col leading-none" aria-label="AI Observatory, home">
-              <span class="text-xl font-bold uppercase tracking-[0.35em] text-ink [text-shadow:0_0_18px_rgba(243,233,207,0.35)] group-hover:text-accent">AI Observatory</span>
+              <span class="text-base font-bold uppercase tracking-[0.25em] text-ink [text-shadow:0_0_18px_rgba(243,233,207,0.35)] group-hover:text-accent sm:text-xl sm:tracking-[0.35em]">AI Observatory</span>
               <span class="mt-1 h-0.5 w-full bg-accent shadow-[0_0_10px_rgba(255,176,0,0.8)]" aria-hidden="true" />
             </Link>
             {location.pathname === "/" ? <FreshnessProvided /> : <FreshnessLive />}
@@ -216,7 +216,7 @@ function Shell() {
           <Nav pathname={location.pathname} onSearch={() => setPalette({ kind: "navigate" })} watching={watchlist.length} />
         </div>
       </header>
-      <main id="main" class="mx-auto flex w-full max-w-[1180px] flex-col gap-10 px-4 py-6 sm:px-6 sm:py-8">
+      <main id="main" class="mx-auto flex w-full min-w-0 max-w-[1180px] flex-col gap-10 px-4 py-6 sm:px-6 sm:py-8">
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/changes" element={<ChangesPage />} />

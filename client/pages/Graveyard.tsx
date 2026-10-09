@@ -49,7 +49,7 @@ export function GraveyardPage() {
         {plural(retired.length, "model")} that were listed and then quietly weren't.{medianLife ? ` The typical one lasted ${plural(Math.round(medianLife), "day")}.` : ""} Rolling aliases are not buried; they move on to the next model in their family.
       </Marquee>
 
-      <div class="flex flex-wrap items-center gap-x-8 gap-y-3">
+      <div class="flex max-w-full flex-wrap items-center gap-x-8 gap-y-3">
         <div class="flex flex-col gap-1.5">
           <span class="text-[11px] font-semibold uppercase tracking-[0.3em] text-ink-muted">Buried</span>
           <FlapText text={String(retired.length)} width={4} size="lg" tone="danger" />
@@ -58,7 +58,7 @@ export function GraveyardPage() {
           <span class="text-[11px] font-semibold uppercase tracking-[0.3em] text-ink-muted">Typical lifespan</span>
           <FlapText text={medianLife ? `${Math.round(medianLife)} DAYS` : "-"} width={9} size="lg" delay={120} />
         </div>
-        <div class="flex flex-col gap-1.5">
+        <div class="flex max-w-full flex-col gap-1.5 overflow-x-auto">
           <span class="text-[11px] font-semibold uppercase tracking-[0.3em] text-ink-muted">Next funeral</span>
           {next ? (
             <Link to="/retiring" class="inline-flex flex-wrap items-center gap-3" aria-label={`${shortName(next.modelId)} in ${daysUntil(next.retiresAt)} days`}>

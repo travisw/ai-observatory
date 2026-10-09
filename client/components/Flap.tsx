@@ -315,7 +315,7 @@ export type FlapRowProps = {
   class?: string;
 };
 
-const ROW = "flex items-center gap-4 border-b border-line/70 px-3 py-1.5 last:border-0 outline-none focus-visible:outline-2 focus-visible:outline-accent";
+const ROW = "flex w-max min-w-full items-center gap-4 border-b border-line/70 px-3 py-1.5 last:border-0 outline-none focus-visible:outline-2 focus-visible:outline-accent";
 
 /** One line of a board. Sticky columns are wrapped together so the model name survives a sideways scroll. */
 function FlapRowInner(props: FlapRowProps) {
@@ -378,7 +378,7 @@ export function ColumnHeads(props: { columns: { label: string; width: number; al
     </span>
   );
   return (
-    <div class="flex items-center gap-4 border-b border-line bg-surface px-3 py-1 text-[11px] font-medium uppercase tracking-[0.25em] text-ink-muted" aria-hidden="true">
+    <div class="flex w-max min-w-full items-center gap-4 border-b border-line bg-surface px-3 py-1 text-[11px] font-medium uppercase tracking-[0.25em] text-ink-muted" aria-hidden="true">
       {sticky.length ? <span class="sticky left-0 z-10 flex shrink-0 items-center gap-4 bg-surface pr-2">{sticky.map(head)}</span> : null}
       {rest.map(head)}
     </div>
@@ -388,7 +388,7 @@ export function ColumnHeads(props: { columns: { label: string; width: number; al
 /** A board: a dark panel with a stencil label on its rail, column captions, and flap rows. */
 export function Board(props: { label: string; hint?: string; action?: ComponentChildren; children: ComponentChildren; id?: string }) {
   return (
-    <section id={props.id} class="overflow-hidden rounded-md border border-line bg-surface shadow-[0_12px_40px_rgba(0,0,0,0.5)]" aria-label={props.label}>
+    <section id={props.id} class="min-w-0 max-w-full overflow-hidden rounded-md border border-line bg-surface shadow-[0_12px_40px_rgba(0,0,0,0.5)]" aria-label={props.label}>
       <header class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-line bg-flap px-3 py-2">
         <div class="flex items-baseline gap-3">
           <h2 class="text-sm font-bold uppercase tracking-[0.4em] text-accent [text-shadow:0_0_14px_rgba(255,176,0,0.45)]">{props.label}</h2>
@@ -396,7 +396,7 @@ export function Board(props: { label: string; hint?: string; action?: ComponentC
         </div>
         {props.action ? <div class="text-[11px] uppercase tracking-[0.2em]">{props.action}</div> : null}
       </header>
-      <div class="overflow-x-auto">{props.children}</div>
+      <div class="max-w-full overflow-x-auto">{props.children}</div>
     </section>
   );
 }

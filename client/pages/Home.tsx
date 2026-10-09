@@ -155,7 +155,7 @@ export function HomePage() {
   return (
     <div class="flex flex-col gap-8">
       {/* NOW */}
-      <div class="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-5" aria-label="Right now">
+      <div class="flex max-w-full flex-wrap gap-x-8 gap-y-4" aria-label="Right now">
         {[
           { label: "Models", value: String(models.length), width: 4, href: "/models", tone: "ink" as FlapTone, aria: `${models.length} models` },
           { label: "Providers", value: String(providers.size), width: 4, href: "/status", tone: "ink" as FlapTone, aria: `${providers.size} providers` },
@@ -163,7 +163,7 @@ export function HomePage() {
           { label: "Departing soon", value: String(departingSoon), width: 4, href: "/retiring", tone: (departingSoon ? "warning" : "ink") as FlapTone, aria: `${departingSoon} models retiring within 30 days` },
           { label: "Systems", value: statuses.length === 0 ? "PENDING" : delayed === 0 ? "ON TIME" : `${delayed} DELAYED`, width: 9, href: "/status", tone: (statuses.length === 0 ? "muted" : delayed === 0 ? "success" : "warning") as FlapTone, aria: statuses.length === 0 ? "status pending" : delayed === 0 ? "all systems on time" : `${delayed} systems delayed` },
         ].map((item, i) => (
-          <Link key={item.label} to={item.href} class="flex flex-col gap-1.5" aria-label={item.aria}>
+          <Link key={item.label} to={item.href} class="flex max-w-full flex-col gap-1.5 overflow-x-auto" aria-label={item.aria}>
             <span class="text-[11px] font-semibold uppercase tracking-[0.3em] text-ink-muted">{item.label}</span>
             <FlapText text={item.value} width={item.width} size="lg" tone={item.tone} delay={i * 40} />
           </Link>

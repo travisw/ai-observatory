@@ -107,7 +107,7 @@ export function ComparePage() {
           </LogSection>
           <Plaque>
             <span class="text-[11px] font-bold uppercase tracking-[0.3em] text-accent">Share this comparison</span>
-            <span class="ml-3 font-mono text-xs text-ink">{`https://ai-observatory.view.fast${compareHref(ids)}`}</span>
+            <span class="ml-3 break-all font-mono text-xs text-ink">{`https://ai-observatory.view.fast${compareHref(ids)}`}</span>
             <span class="ml-3 text-xs text-ink-muted">Listed {models.map((m) => `${shortName(m.modelId, m.name)} ${longDate(m.firstSeenAt)}`).join(" · ")}</span>
           </Plaque>
         </>
