@@ -1,17 +1,15 @@
 /**
- * The full record with filters in the URL, so every view is a link someone can send.
+ * The full log with filters in the URL, so every view is a link someone can send.
  */
 import { useMemo } from "preact/hooks";
-import { Link, useNavigate, useQuery } from "@spacefast/zero/client";
-import { Button, EmptyState, Select, Skeleton } from "@spacefast/zero/kit";
+import { useNavigate, useQuery } from "@spacefast/zero/client";
 
 import { providerName } from "../../shared/providers";
 import type { Story } from "../../shared/stories";
 import type { ArchiveEvent, HostEvent, LifecycleEvent, ModelRow, Page, SourceEventRow } from "../../shared/types";
-import { Card, Chip, Section } from "../components/bits";
-import { StoryRow } from "../components/StoryRow";
-import { KIND_GROUPS, assembleStories, keyIndex, kindInGroup, nameIndex } from "../lib/stories";
-import { storyHref } from "../lib/stories";
+import { Sign } from "../components/Flap";
+import { BoardEmpty, BoardSkeleton, LogDay, LogSection, Marquee, SignSelect, Stencil, StoryLine } from "../components/Log";
+import { KIND_GROUPS, assembleStories, keyIndex, kindInGroup, nameIndex, storyHref } from "../lib/stories";
 import { dayLabel, plural, usePageTitle, useSearchParams } from "../lib/util";
 import { matchesWatch, useWatchlist } from "../lib/watch";
 
@@ -43,7 +41,7 @@ function usePages(provider: string, pages: number): { events: ArchiveEvent[]; la
 }
 
 export function ChangesPage() {
-  usePageTitle("Changes");
+  usePageTitle("The log");
   const params = useSearchParams();
   const navigate = useNavigate();
   const kind = params.get("kind") ?? "";
@@ -92,57 +90,52 @@ export function ChangesPage() {
   const loading = events.length === 0 && loaded === 0;
 
   return (
-    <div class="flex flex-col gap-6">
-      <Section title="Changes" hint={stories.length ? `${plural(stories.length, "change")} loaded` : undefined}>
-        <div class="flex flex-wrap items-center gap-2">
-          <div class="flex flex-wrap gap-1.5">
-            <Chip active={!kind} href={withParam(params, "kind", "")}>All</Chip>
+    <div class="flex flex-col gap-8">
+      <Marquee title="The log" action={<><Sign href="/feed.xml">RSS</Sign><Sign href="/export/changes.csv">CSV</Sign></>}>
+        Everything recorded, newest first. Small price wobbles are folded into one line per model per day; every view here is a link you can send.
+      </Marquee>
+      <LogSection
+        title="Entries"
+        hint={stories.length ? `${plural(stories.length, "entry", "entries")} loaded` : undefined}
+        action={
+          <>
+            <Stencil active={!kind} href={withParam(params, "kind", "")}>All</Stencil>
             {Object.entries(KIND_GROUPS).map(([key, g]) => (
-              <Chip key={key} active={kind === key} href={withParam(params, "kind", key)}>{g.label}</Chip>
+              <Stencil key={key} active={kind === key} href={withParam(params, "kind", key)}>{g.label}</Stencil>
             ))}
-            <Chip active={confirmedOnly} href={withParam(params, "confirmed", confirmedOnly ? "" : "1")} title="Only moves another price list also recorded">Confirmed only</Chip>
-            {watchlist.length ? <Chip active={watchOnly} href={withParam(params, "watch", watchOnly ? "" : "1")}>Watching ({watchlist.length})</Chip> : null}
-          </div>
-          <label class="ml-auto flex items-center gap-2 text-xs text-ink-muted">
-            Provider
-            <Select value={provider} onChange={(e) => navigate(withParam(params, "provider", (e.currentTarget as HTMLSelectElement).value))} aria-label="Filter by provider">
-              <option value="">all</option>
+            <Stencil active={confirmedOnly} href={withParam(params, "confirmed", confirmedOnly ? "" : "1")} title="Only moves another price list also recorded">Confirmed</Stencil>
+            {watchlist.length ? <Stencil active={watchOnly} href={withParam(params, "watch", watchOnly ? "" : "1")}>Watching {watchlist.length}</Stencil> : null}
+            <SignSelect value={provider} onChange={(v) => navigate(withParam(params, "provider", v))} label="Filter by provider">
+              <option value="">Every provider</option>
               {providers.map((p) => <option key={p} value={p}>{providerName(p)}</option>)}
-            </Select>
-          </label>
-        </div>
-        <Card padded={false} class="px-4">
-          {loading ? (
-            <div class="flex flex-col gap-3 py-3">{[0, 1, 2, 3, 4, 5].map((i) => <Skeleton key={i} class="h-8 w-full" />)}</div>
-          ) : stories.length === 0 ? (
-            <EmptyState title="Nothing matches" description={last && !last.isDone ? "Try loading older changes, or loosen the filters." : "Loosen the filters."} action={last && !last.isDone ? <Button variant="outline" size="sm" onClick={() => navigate(withParam(params, "page", String(pages + 1)))}>Load older</Button> : undefined} />
-          ) : (
-            [...byDay.entries()].map(([day, list]) => (
-              <div key={day}>
-                <h3 class="sticky top-0 z-10 -mx-4 border-b border-line bg-surface/95 px-4 py-1.5 text-xs font-medium text-ink-muted backdrop-blur">
-                  {dayLabel(day)} <span class="font-normal">· {plural(list.length, "change")}</span>
-                </h3>
-                <ul>
-                  {list.map((s) => <StoryRow key={s.key} story={s} href={storyHref(s, keys)} compact showMore />)}
-                </ul>
-              </div>
-            ))
-          )}
-        </Card>
-        <div class="flex flex-wrap items-center justify-between gap-3 text-xs text-ink-muted">
-          <span>
-            {oldest ? `Loaded back to ${dayLabel(oldest)}.` : ""} Small price wobbles are folded into one line per model per day.
-          </span>
-          <span class="flex gap-2">
-            {pages > 1 ? <Link to={withParam(params, "page", String(pages - 1))} class="text-accent hover:underline">fewer</Link> : null}
+            </SignSelect>
+          </>
+        }
+      >
+        {loading ? (
+          <BoardSkeleton rows={8} size="sm" />
+        ) : stories.length === 0 ? (
+          <BoardEmpty>{last && !last.isDone ? "Nothing matches in what is loaded. Load older, or loosen the filters." : "Nothing matches. Loosen the filters."}</BoardEmpty>
+        ) : (
+          [...byDay.entries()].map(([day, list]) => (
+            <div key={day}>
+              <LogDay>{dayLabel(day)} <span class="font-normal text-ink-muted">· {plural(list.length, "entry", "entries")}</span></LogDay>
+              <ul>{list.map((s) => <StoryLine key={s.key} story={s} href={storyHref(s, keys)} showMore />)}</ul>
+            </div>
+          ))
+        )}
+        <div class="flex flex-wrap items-center justify-between gap-3 pt-2">
+          <span class="text-xs text-ink-muted">{oldest ? `Loaded back to ${dayLabel(oldest)}.` : ""}</span>
+          <span class="flex gap-1.5">
+            {pages > 1 ? <Sign to={withParam(params, "page", String(pages - 1))}>Fewer</Sign> : null}
             {last && !last.isDone ? (
-              <Button variant="outline" size="sm" onClick={() => navigate(withParam(params, "page", String(pages + 1)))}>Load older</Button>
+              <Sign onClick={() => navigate(withParam(params, "page", String(pages + 1)))} active>Load older</Sign>
             ) : (
-              <span>That is the whole record.</span>
+              <span class="text-[11px] uppercase tracking-[0.2em] text-ink-muted">That is the whole record</span>
             )}
           </span>
         </div>
-      </Section>
+      </LogSection>
     </div>
   );
 }

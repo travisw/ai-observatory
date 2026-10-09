@@ -1,18 +1,18 @@
 /**
- * Pulse: where developer attention is going, snapshotted once a day.
+ * Pulse: where developer attention is going, snapshotted once a day, kept as a logbook.
  */
 import type { ComponentChildren } from "preact";
 import { useQuery } from "@spacefast/zero/client";
-import { EmptyState } from "@spacefast/zero/kit";
 
 import type { PkgRow, PollRow, PypiRow, RepoRow, TrendRow } from "../../shared/types";
-import { Card, Section } from "../components/bits";
-import { clockTime, dayLabel, usePageTitle } from "../lib/util";
+import { BoardEmpty, LogLine, LogSection, Marquee } from "../components/Log";
+import { boardDate, boardTime } from "../lib/board";
+import { dayLabel, usePageTitle } from "../lib/util";
 
 function List<T extends { id: string }>(props: { rows: T[] | undefined; render: (r: T) => ComponentChildren; empty?: string }) {
   const rows = props.rows ?? [];
-  if (rows.length === 0) return <EmptyState title="No snapshot yet" description={props.empty ?? "The daily check has not run."} />;
-  return <ul>{rows.map((r) => <li key={r.id} class="flex items-center gap-3 border-b border-line px-4 py-1.5 text-sm last:border-0">{props.render(r)}</li>)}</ul>;
+  if (rows.length === 0) return <BoardEmpty>{props.empty ?? "No snapshot yet. The daily check has not run."}</BoardEmpty>;
+  return <ul>{rows.map((r) => props.render(r))}</ul>;
 }
 
 export function PulsePage() {
@@ -25,38 +25,43 @@ export function PulsePage() {
   const latestDay = trending?.[0]?.at;
 
   return (
-    <div class="flex flex-col gap-10">
-      <div class="flex flex-col gap-2">
-        <h1 class="text-2xl font-semibold tracking-tight text-ink sm:text-3xl">Pulse</h1>
-        <p class="max-w-2xl text-sm text-ink-muted">Where attention is going, snapshotted once a day: what people download, star and look at.{latestDay ? ` Last snapshot ${dayLabel(latestDay).toLowerCase()}.` : ""}</p>
-      </div>
+    <div class="flex flex-col gap-8">
+      <Marquee title="Pulse">
+        Where attention is going, snapshotted once a day: what people download, star and look at.{latestDay ? ` Last snapshot ${dayLabel(latestDay).toLowerCase()}.` : ""}
+      </Marquee>
       <div class="grid gap-8 md:grid-cols-2">
-        <Section title="Hugging Face trending" hint="open-weights models people are looking at">
-          <Card padded={false}>
-            <List rows={trending} render={(r) => (<><span class="w-6 font-mono text-xs text-ink-muted">{r.rank}</span><a href={`https://huggingface.co/${r.modelId}`} target="_blank" rel="noopener" class="min-w-0 flex-1 truncate text-ink hover:text-accent">{r.modelId}</a><span class="font-mono text-xs tabular-nums text-ink-muted">{Number(r.likes).toLocaleString()} likes</span></>)} />
-          </Card>
-        </Section>
-        <Section title="npm downloads" hint="client libraries, last week">
-          <Card padded={false}>
-            <List rows={packages} render={(r) => (<><span class="min-w-0 flex-1 truncate font-mono text-ink">{r.pkg}</span><span class="font-mono text-xs tabular-nums text-ink-muted">{Number(r.downloads).toLocaleString()}</span></>)} />
-          </Card>
-        </Section>
-        <Section title="PyPI downloads" hint="client libraries, last week">
-          <Card padded={false}>
-            <List rows={pypi} render={(r) => (<><span class="min-w-0 flex-1 truncate font-mono text-ink">{r.pkg}</span><span class="font-mono text-xs tabular-nums text-ink-muted">{Number(r.lastWeek).toLocaleString()}</span></>)} />
-          </Card>
-        </Section>
-        <Section title="GitHub" hint="stars · open issues">
-          <Card padded={false}>
-            <List rows={repos} render={(r) => (<><a href={`https://github.com/${r.repo}`} target="_blank" rel="noopener" class="min-w-0 flex-1 truncate font-mono text-ink hover:text-accent">{r.repo}</a><span class="font-mono text-xs tabular-nums text-accent">{Number(r.stars).toLocaleString()}</span><span class="w-12 text-right font-mono text-xs tabular-nums text-ink-muted">{r.openIssues}</span></>)} />
-          </Card>
-        </Section>
+        <LogSection title="Hugging Face trending" hint="open-weights models people are looking at">
+          <List rows={trending} render={(r) => (
+            <LogLine key={r.id} left={`#${r.rank}`} right={<span class="text-ink-muted">{Number(r.likes).toLocaleString()} LIKES</span>}>
+              <a href={`https://huggingface.co/${r.modelId}`} target="_blank" rel="noopener" class="font-mono text-xs hover:text-accent">{r.modelId}</a>
+            </LogLine>
+          )} />
+        </LogSection>
+        <LogSection title="npm downloads" hint="client libraries, last week">
+          <List rows={packages} render={(r) => (
+            <LogLine key={r.id} left="NPM" right={<span class="text-ink">{Number(r.downloads).toLocaleString()}</span>}><span class="font-mono text-xs">{r.pkg}</span></LogLine>
+          )} />
+        </LogSection>
+        <LogSection title="PyPI downloads" hint="client libraries, last week">
+          <List rows={pypi} render={(r) => (
+            <LogLine key={r.id} left="PYPI" right={<span class="text-ink">{Number(r.lastWeek).toLocaleString()}</span>}><span class="font-mono text-xs">{r.pkg}</span></LogLine>
+          )} />
+        </LogSection>
+        <LogSection title="GitHub" hint="stars · open issues">
+          <List rows={repos} render={(r) => (
+            <LogLine key={r.id} left="REPO" right={<span><span class="text-accent">{Number(r.stars).toLocaleString()} ★</span> <span class="text-ink-muted">{r.openIssues} OPEN</span></span>}>
+              <a href={`https://github.com/${r.repo}`} target="_blank" rel="noopener" class="font-mono text-xs hover:text-accent">{r.repo}</a>
+            </LogLine>
+          )} />
+        </LogSection>
       </div>
-      <Section title="Collector log" hint="each check, newest first; gaps in the record show up here">
-        <Card padded={false}>
-          <List rows={polls} render={(r) => (<><span class="font-mono text-xs text-ink-muted">{dayLabel(r.at)} {clockTime(r.at)}</span><span class="w-16 font-mono text-xs text-ink-muted">{r.source}</span><span class="min-w-0 flex-1 truncate text-ink">{r.note}</span><span class={`font-mono text-xs ${r.ok ? "text-success" : "text-danger"}`}>{r.ok ? "ok" : "failed"}</span></>)} />
-        </Card>
-      </Section>
+      <LogSection title="Collector log" hint="each check, newest first; gaps in the record show up here">
+        <List rows={polls} render={(r) => (
+          <LogLine key={r.id} left={`${boardDate(r.at)} ${boardTime(r.at)}`} right={<span class={r.ok ? "text-success" : "text-danger"}>{r.ok ? "OK" : "FAILED"}</span>}>
+            <span class="mr-2 text-[10px] uppercase tracking-[0.2em] text-ink-muted">{r.source}</span>{r.note}
+          </LogLine>
+        )} />
+      </LogSection>
     </div>
   );
 }

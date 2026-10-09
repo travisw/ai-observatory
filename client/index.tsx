@@ -4,7 +4,7 @@
  */
 import { useEffect, useRef, useState } from "preact/hooks";
 import { Link, Route, Router, Routes, useLocation, useNavigate, useQuery } from "@spacefast/zero/client";
-import { EmptyState, Icon, Kbd } from "@spacefast/zero/kit";
+import { Icon, Kbd } from "@spacefast/zero/kit";
 
 import { BOARD_FONT, FlapStyles, FlapText, Sign } from "./components/Flap";
 import { Palette, type PaletteMode } from "./components/Palette";
@@ -24,6 +24,7 @@ import { ModelPage } from "./pages/Model";
 import { ModelsPage } from "./pages/Models";
 import { PriceIndexPage } from "./pages/PriceIndex";
 import { ProviderPage } from "./pages/Provider";
+import { ProvidersPage } from "./pages/Providers";
 import { PulsePage } from "./pages/Pulse";
 import { RecordsPage } from "./pages/Records";
 import { RetiringPage } from "./pages/Retiring";
@@ -33,8 +34,9 @@ import { TimeMachinePage } from "./pages/TimeMachine";
 const PRIMARY = [
   { to: "/", label: "Changes", match: (p: string) => p === "/" || p === "/changes" || p.startsWith("/model/") },
   { to: "/models", label: "Models", match: (p: string) => p === "/models" || p === "/catalog" },
-  { to: "/status", label: "Providers", match: (p: string) => p.startsWith("/provider/") || p === "/status" },
-  { to: "/retiring", label: "Retiring", match: (p: string) => p === "/retiring" },
+  { to: "/providers", label: "Providers", match: (p: string) => p.startsWith("/provider") },
+  { to: "/status", label: "Status", match: (p: string) => p === "/status" },
+  { to: "/retiring", label: "Departures", match: (p: string) => p === "/retiring" },
 ];
 
 const MORE = [
@@ -221,6 +223,7 @@ function Shell() {
           <Route path="/models" element={<ModelsPage />} />
           <Route path="/catalog" element={<ModelsPage />} />
           <Route path="/model/*id" element={<ModelPage />} />
+          <Route path="/providers" element={<ProvidersPage />} />
           <Route path="/provider/:slug" element={<ProviderPage />} />
           <Route path="/compare" element={<ComparePage />} />
           <Route path="/status" element={<StatusPage />} />
@@ -234,7 +237,7 @@ function Shell() {
           <Route path="/signals" element={<PulsePage />} />
           <Route path="/about" element={<AboutPage />} />
           <Route path="/api" element={<ApiPage />} />
-          <Route path="*rest" element={<EmptyState title="Not found" description="No page at this address." icon="search" />} />
+          <Route path="*rest" element={<div class="flex flex-col gap-3"><FlapText text="NOT FOUND" width={9} size="lg" tone="danger" /><p class="text-sm text-ink-muted">No page at this address. <Link to="/" class="text-accent hover:underline">Back to the hall</Link>.</p></div>} />
         </Routes>
       </main>
       <footer class="mx-auto w-full max-w-[1180px] px-4 pb-8 sm:px-6">

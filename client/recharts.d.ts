@@ -6,6 +6,7 @@ declare module "recharts" {
     Line: ComponentType<any>;
     XAxis: ComponentType<any>;
     YAxis: ComponentType<any>;
+    ZAxis: ComponentType<any>;
     Tooltip: ComponentType<any>;
     Legend: ComponentType<any>;
     CartesianGrid: ComponentType<any>;
@@ -13,6 +14,9 @@ declare module "recharts" {
     ResponsiveContainer: ComponentType<any>;
     BarChart: ComponentType<any>;
     Bar: ComponentType<any>;
+    ScatterChart: ComponentType<any>;
+    Scatter: ComponentType<any>;
+    Cell: ComponentType<any>;
   };
   export default recharts;
 }

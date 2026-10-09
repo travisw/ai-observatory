@@ -1,29 +1,32 @@
 /**
- * The catalogue as a table: sortable, filterable, with a sparkline per row.
+ * The catalogue: the sky tonight on top (every scored model as a star), the full logbook table
+ * beneath, sortable and filterable, with a sparkline per row.
  */
 import { useMemo } from "preact/hooks";
 import { Link, useNavigate, useQuery } from "@spacefast/zero/client";
 import { Sparkline } from "@spacefast/zero/charts";
-import { Checkbox, EmptyState, Input, Select, Skeleton } from "@spacefast/zero/kit";
 
 import { formatContext, money } from "../../shared/model";
 import { isAlias, providerName } from "../../shared/providers";
 import type { ArchiveEvent, HostsOverviewRow, ModelRow } from "../../shared/types";
-import { Card, ModelLink, Section } from "../components/bits";
+import { Board, Sign } from "../components/Flap";
+import { BoardEmpty, LogSection, Marquee, PageSkeleton, SignInput, SignSelect, Stencil } from "../components/Log";
+import { StarChart } from "../components/StarChart";
+import { shortName } from "../lib/board";
 import { inputSpark } from "../lib/series";
-import { isLoading, longDate, plural, usePageTitle, useSearchParams, useSince } from "../lib/util";
+import { isLoading, longDate, modelHref, plural, usePageTitle, useSearchParams, useSince } from "../lib/util";
 import { matchesWatchModel, useWatchlist } from "../lib/watch";
 
 type SortKey = "model" | "context" | "input" | "output" | "listed" | "score" | "changes";
 
 const SORTS: { key: SortKey; label: string; align?: "right" }[] = [
-  { key: "model", label: "model" },
-  { key: "context", label: "context", align: "right" },
-  { key: "input", label: "in $/M", align: "right" },
-  { key: "output", label: "out $/M", align: "right" },
-  { key: "score", label: "intelligence", align: "right" },
-  { key: "changes", label: "changes", align: "right" },
-  { key: "listed", label: "listed", align: "right" },
+  { key: "model", label: "Model" },
+  { key: "context", label: "Context", align: "right" },
+  { key: "input", label: "In $/M", align: "right" },
+  { key: "output", label: "Out $/M", align: "right" },
+  { key: "score", label: "Index", align: "right" },
+  { key: "changes", label: "Changes", align: "right" },
+  { key: "listed", label: "Listed", align: "right" },
 ];
 
 function paidFirst(a: string, b: string): number {
@@ -83,67 +86,86 @@ export function ModelsPage() {
       });
   }, [active, retired, retiredOn, provider, watchOnly, watchlist, needle, sort]);
 
-  if (isLoading(active)) return <div class="flex flex-col gap-3"><Skeleton class="h-10 w-1/3" /><Skeleton class="h-64 w-full" /></div>;
+  if (isLoading(active)) return <PageSkeleton />;
+
+  const skyModels = (active ?? []).filter((m) => !provider || m.provider.replace(/^~/, "") === provider);
 
   return (
-    <Section title="Models" hint={`${plural(rows.length, "model")} shown`} action={<a href="/api/models.json" class="text-accent hover:underline">JSON</a>}>
-      <div class="flex flex-wrap items-center gap-3">
-        <span class="w-full max-w-xs"><Input placeholder="Filter by model or provider" value={q} onInput={(e) => set("q", (e.currentTarget as HTMLInputElement).value)} aria-label="Filter models" /></span>
-        <Select value={provider} onChange={(e) => set("provider", (e.currentTarget as HTMLSelectElement).value)} aria-label="Provider">
-          <option value="">every provider</option>
-          {providers.map((p) => <option key={p} value={p}>{providerName(p)}</option>)}
-        </Select>
-        <Checkbox label={`include delisted (${(retired ?? []).length})`} checked={retiredOn} onChange={() => set("retired", retiredOn ? "" : "1")} />
-        {watchlist.length ? <Checkbox label={`watching only (${watchlist.length})`} checked={watchOnly} onChange={() => set("watch", watchOnly ? "" : "1")} /> : null}
-      </div>
-      {rows.length === 0 ? (
-        <EmptyState title="Nothing matches" description="Try a shorter filter." icon="search" />
-      ) : (
-        <Card padded={false}>
+    <div class="flex flex-col gap-8">
+      <Marquee title="Models" action={<Sign href="/api/models.json">JSON</Sign>}>
+        {plural((active ?? []).length, "model")} listed right now. Prices per million tokens as listed on OpenRouter.
+      </Marquee>
+
+      <Board label="The sky tonight" hint="every scored model: capability across, input price up, size is context" action={provider ? <Sign to="/models">Whole sky</Sign> : undefined}>
+        <div class="p-3">
+          <StarChart models={skyModels} title="The sky tonight" />
+        </div>
+      </Board>
+
+      <LogSection
+        title="The catalogue"
+        hint={`${plural(rows.length, "model")} shown`}
+        action={
+          <>
+            <SignInput value={q} onInput={(v) => set("q", v)} placeholder="Filter by model or provider" label="Filter models" class="w-56" />
+            <SignSelect value={provider} onChange={(v) => set("provider", v)} label="Provider">
+              <option value="">Every provider</option>
+              {providers.map((p) => <option key={p} value={p}>{providerName(p)}</option>)}
+            </SignSelect>
+            <Stencil active={retiredOn} onClick={() => set("retired", retiredOn ? "" : "1")}>Delisted {(retired ?? []).length}</Stencil>
+            {watchlist.length ? <Stencil active={watchOnly} onClick={() => set("watch", watchOnly ? "" : "1")}>Watching {watchlist.length}</Stencil> : null}
+          </>
+        }
+      >
+        {rows.length === 0 ? (
+          <BoardEmpty>Nothing matches. Try a shorter filter.</BoardEmpty>
+        ) : (
           <div class="overflow-x-auto">
             <table class="w-full text-sm">
               <thead>
-                <tr class="border-b border-line text-left text-xs text-ink-muted">
+                <tr class="border-b border-accent/40 text-left text-[11px] uppercase tracking-[0.2em] text-ink-muted">
                   {SORTS.map((s) => (
-                    <th key={s.key} class={`px-3 py-2 font-normal first:px-4 ${s.align === "right" ? "text-right" : ""}`}>
-                      <button type="button" class={`hover:text-ink ${sort === s.key ? "text-accent" : ""}`} onClick={() => set("sort", s.key)} aria-sort={sort === s.key ? "descending" : undefined}>
+                    <th key={s.key} class={`py-2 pr-3 font-semibold ${s.key === "model" ? "sticky left-0 bg-canvas" : ""} ${s.align === "right" ? "text-right" : ""}`}>
+                      <button type="button" class={`uppercase tracking-[0.2em] hover:text-ink ${sort === s.key ? "text-accent" : ""}`} onClick={() => set("sort", s.key)} aria-sort={sort === s.key ? "descending" : undefined}>
                         {s.label}{sort === s.key ? " ▾" : ""}
                       </button>
                     </th>
                   ))}
-                  <th class="px-3 py-2 font-normal">90 days</th>
-                  <th class="px-4 py-2 font-normal">cheapest host</th>
+                  <th class="py-2 pr-3 font-semibold">90 days</th>
+                  <th class="py-2 font-semibold">Cheapest host</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((m) => {
                   const host = hostIndex.get(m.modelId);
                   return (
-                    <tr key={m.id} class={`border-b border-line last:border-0 ${m.active ? "" : "opacity-50"}`}>
-                      <td class="px-4 py-1.5">
-                        <ModelLink modelId={m.modelId} name={m.name} withProvider />
-                        {isAlias(m.modelId) ? <span class="ml-1 text-[11px] text-ink-muted">alias</span> : null}
+                    <tr key={m.id} class={`border-b border-dotted border-line last:border-0 ${m.active ? "" : "opacity-50"}`}>
+                      <td class="sticky left-0 bg-canvas py-1.5 pr-3">
+                        <Link to={modelHref(m.modelId)} class="text-[15px] text-ink hover:text-accent">
+                          <span class="text-ink-muted">{providerName(m.provider)} </span>{shortName(m.modelId, m.name)}
+                        </Link>
+                        {isAlias(m.modelId) ? <span class="ml-2 text-[10px] uppercase tracking-[0.2em] text-ink-muted">alias</span> : null}
                       </td>
-                      <td class="px-3 py-1.5 text-right font-mono tabular-nums text-ink-muted">{formatContext(m.contextLength)}</td>
-                      <td class="px-3 py-1.5 text-right font-mono tabular-nums text-ink">{money(m.promptPrice)}</td>
-                      <td class="px-3 py-1.5 text-right font-mono tabular-nums text-ink">{money(m.completionPrice)}</td>
-                      <td class="px-3 py-1.5 text-right font-mono tabular-nums text-ink-muted">{m.aaIntelligence || "–"}</td>
-                      <td class="px-3 py-1.5 text-right font-mono tabular-nums text-ink-muted">{m.changeCount || "0"}</td>
-                      <td class="px-3 py-1.5 text-right font-mono text-xs tabular-nums text-ink-muted">{longDate(m.firstSeenAt)}</td>
-                      <td class="px-3 py-1.5"><Sparkline values={inputSpark(m, events ?? [])} width={64} height={18} /></td>
-                      <td class="px-4 py-1.5 text-xs text-ink-muted">{host ? `${host.cheapestHost} · ${money(host.cheapestIn)}${Number(host.hosts) > 1 ? ` of ${host.hosts}` : ""}` : "–"}</td>
+                      <td class="py-1.5 pr-3 text-right font-mono text-xs tabular-nums text-ink-muted">{formatContext(m.contextLength)}</td>
+                      <td class="py-1.5 pr-3 text-right font-mono text-xs tabular-nums text-ink">{money(m.promptPrice)}</td>
+                      <td class="py-1.5 pr-3 text-right font-mono text-xs tabular-nums text-ink">{money(m.completionPrice)}</td>
+                      <td class="py-1.5 pr-3 text-right font-mono text-xs tabular-nums text-ink-muted">{m.aaIntelligence || "–"}</td>
+                      <td class="py-1.5 pr-3 text-right font-mono text-xs tabular-nums text-ink-muted">{m.changeCount || "0"}</td>
+                      <td class="py-1.5 pr-3 text-right font-mono text-xs tabular-nums text-ink-muted">{longDate(m.firstSeenAt)}</td>
+                      <td class="py-1.5 pr-3"><Sparkline values={inputSpark(m, events ?? [])} width={64} height={18} color="#ffb000" /></td>
+                      <td class="py-1.5 text-xs text-ink-muted">{host ? `${host.cheapestHost} · ${money(host.cheapestIn)}${Number(host.hosts) > 1 ? ` of ${host.hosts}` : ""}` : "–"}</td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
           </div>
-        </Card>
-      )}
-      <p class="text-xs text-ink-muted">
-        Prices per million tokens as listed on OpenRouter. "Intelligence" is the Artificial Analysis index OpenRouter publishes for each model; higher is more capable. The sparkline is the input price over 90 days.
-        {" "}<Link to="/compare" class="text-accent hover:underline">Compare models side by side</Link>.
-      </p>
-    </Section>
+        )}
+        <p class="text-xs text-ink-muted">
+          "Index" is the Artificial Analysis intelligence index OpenRouter publishes for each model; higher is more capable. The sparkline is the input price over 90 days.
+          {" "}<Link to="/compare" class="text-accent hover:underline">Compare models side by side</Link>.
+        </p>
+      </LogSection>
+    </div>
   );
 }

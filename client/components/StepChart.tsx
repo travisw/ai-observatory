@@ -1,10 +1,12 @@
 /**
  * A step chart for prices and limits. Prices are step functions: a sloped line between two
  * points draws a change that never happened. recharts is served by the platform, no install.
+ * Styled like the hall: black plot, cream and amber strokes, dotted rails, condensed labels.
  */
 import recharts from "recharts";
-import { seriesColor } from "@spacefast/zero/charts";
 
+import { BOARD_FONT } from "./Flap";
+import { CHART_STROKES } from "../lib/board";
 import type { StepPoint } from "../lib/series";
 import { valueAt } from "../lib/series";
 import { DAY } from "../lib/util";
@@ -14,18 +16,23 @@ const { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContain
 
 export type StepSeries = { key: string; label: string; points: StepPoint[]; dashed?: boolean; color?: string };
 
-function fmtMoney(v: number): string {
+export const AXIS_TICK = { fontSize: 12, fontFamily: BOARD_FONT, fill: "#8f8a7a", letterSpacing: "0.08em" };
+export const TOOLTIP_STYLE = { background: "#090909", border: "1px solid #2a2a2a", borderRadius: 2, fontSize: 12, fontFamily: BOARD_FONT, letterSpacing: "0.05em", textTransform: "uppercase" as const };
+
+export function fmtMoney(v: number): string {
   if (v >= 100) return `$${v.toFixed(0)}`;
   if (v >= 10) return `$${v.toFixed(1)}`;
   if (v >= 1) return `$${v.toFixed(2)}`;
   return `$${v.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}`;
 }
 
+const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+
 function fmtDate(t: number, spanDays: number): string {
   const d = new Date(t);
   if (spanDays <= 2) return d.toISOString().slice(11, 16);
-  if (spanDays <= 400) return d.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
-  return d.toLocaleDateString(undefined, { month: "short", year: "numeric", timeZone: "UTC" });
+  if (spanDays <= 400) return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
+  return `${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 }
 
 /**
@@ -65,25 +72,25 @@ export function StepChart(props: {
     .filter(Boolean)
     .join("; ");
   return (
-    <div class="w-full" style={{ height: `${props.height ?? 260}px` }} role="img" aria-label={`Chart. ${summary}`}>
+    <div class="w-full rounded-sm bg-canvas p-2" style={{ height: `${props.height ?? 260}px` }} role="img" aria-label={`Chart. ${summary}`}>
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={rows} margin={{ top: 12, right: 16, left: 4, bottom: 4 }}>
-          <CartesianGrid stroke="var(--color-line)" strokeDasharray="2 4" vertical={false} />
+          <CartesianGrid stroke="#2a2a2a" strokeDasharray="1 5" vertical={false} />
           <XAxis
             dataKey="t"
             type="number"
             domain={[props.from, to]}
             tickFormatter={(t: number) => fmtDate(t, spanDays)}
-            stroke="var(--color-ink-muted)"
-            tick={{ fontSize: 11, fontFamily: "ui-monospace, monospace" }}
+            stroke="#2a2a2a"
+            tick={AXIS_TICK}
             tickLine={false}
-            axisLine={{ stroke: "var(--color-line)" }}
+            axisLine={{ stroke: "#2a2a2a" }}
             minTickGap={48}
           />
           <YAxis
             tickFormatter={(v: number) => fmt(v)}
-            stroke="var(--color-ink-muted)"
-            tick={{ fontSize: 11, fontFamily: "ui-monospace, monospace" }}
+            stroke="#2a2a2a"
+            tick={AXIS_TICK}
             tickLine={false}
             axisLine={false}
             width={56}
@@ -92,13 +99,14 @@ export function StepChart(props: {
           <Tooltip
             labelFormatter={(t: number) => new Date(t).toISOString().replace("T", " ").slice(0, 16) + " UTC"}
             formatter={(v: number, name: string) => [fmt(v), name]}
-            contentStyle={{ background: "var(--color-surface)", border: "1px solid var(--color-line)", borderRadius: 8, fontSize: 12, fontFamily: "ui-monospace, monospace" }}
-            labelStyle={{ color: "var(--color-ink-muted)" }}
-            itemStyle={{ color: "var(--color-ink)" }}
+            contentStyle={TOOLTIP_STYLE}
+            labelStyle={{ color: "#8f8a7a" }}
+            itemStyle={{ color: "#f3e9cf" }}
+            cursor={{ stroke: "#ffb000", strokeDasharray: "2 3" }}
           />
-          {props.series.length > 1 ? <Legend wrapperStyle={{ fontSize: 12 }} /> : null}
+          {props.series.length > 1 ? <Legend wrapperStyle={{ fontSize: 12, fontFamily: BOARD_FONT, letterSpacing: "0.08em", textTransform: "uppercase" }} /> : null}
           {props.lowLine ? (
-            <ReferenceLine y={props.lowLine.value} stroke="var(--color-success)" strokeDasharray="4 4" label={{ value: props.lowLine.label, position: "insideTopRight", fill: "var(--color-success)", fontSize: 11 }} />
+            <ReferenceLine y={props.lowLine.value} stroke="#7df0a1" strokeDasharray="4 4" label={{ value: props.lowLine.label.toUpperCase(), position: "insideTopRight", fill: "#7df0a1", fontSize: 11, fontFamily: BOARD_FONT, letterSpacing: "0.08em" }} />
           ) : null}
           {props.series.map((s, i) => (
             <Line
@@ -106,10 +114,10 @@ export function StepChart(props: {
               type="stepAfter"
               dataKey={s.key}
               name={s.label}
-              stroke={s.color ?? seriesColor(i)}
+              stroke={s.color ?? CHART_STROKES[i % CHART_STROKES.length]}
               strokeWidth={1.5}
               strokeDasharray={s.dashed ? "5 4" : undefined}
-              dot={{ r: 2.5, strokeWidth: 0, fill: s.color ?? seriesColor(i) }}
+              dot={{ r: 2.5, strokeWidth: 0, fill: s.color ?? CHART_STROKES[i % CHART_STROKES.length] }}
               activeDot={{ r: 4 }}
               isAnimationActive={false}
               connectNulls
@@ -131,14 +139,14 @@ export function StepTable(props: { series: StepSeries[]; formatValue?: (v: numbe
     <div class="overflow-x-auto">
       <table class="w-full font-mono text-xs tabular-nums">
         <thead>
-          <tr class="border-b border-line text-left text-ink-muted">
+          <tr class="border-b border-accent/40 text-left text-[11px] uppercase tracking-[0.2em] text-ink-muted">
             <th class="py-1 pr-3 font-normal">when (UTC)</th>
             {props.series.map((s) => <th key={s.key} class="py-1 pr-3 font-normal">{s.label}</th>)}
           </tr>
         </thead>
         <tbody>
           {rows.map((t) => (
-            <tr key={t} class="border-b border-line last:border-0">
+            <tr key={t} class="border-b border-dotted border-line last:border-0">
               <td class="py-1 pr-3 text-ink-muted">{new Date(t).toISOString().replace("T", " ").slice(0, 16)}</td>
               {props.series.map((s) => {
                 const v = valueAt(s.points, t);

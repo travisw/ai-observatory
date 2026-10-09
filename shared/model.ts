@@ -105,6 +105,8 @@ export function perMillion(rawPerToken: string): string {
   if (!rawPerToken) return "";
   const value = Number(rawPerToken);
   if (!Number.isFinite(value) || value === 0) return "0";
+  // OpenRouter lists routers that bill whatever the chosen model costs as a negative price.
+  if (value < 0) return "varies";
   const scaled = value * 1_000_000;
   return scaled >= 100 ? scaled.toFixed(0) : scaled.toFixed(scaled >= 1 ? 2 : 3);
 }
@@ -115,6 +117,7 @@ export function money(rawPerToken: string): string {
   const value = Number(rawPerToken) * 1_000_000;
   if (!Number.isFinite(value)) return "";
   if (value === 0) return "$0";
+  if (value < 0) return "varies";
   let text = value >= 100 ? value.toFixed(0) : value >= 10 ? value.toFixed(1) : value >= 1 ? value.toFixed(2) : value.toFixed(3);
   while (text.includes(".") && text.endsWith("0") && text.split(".")[1].length > 2) text = text.slice(0, -1);
   if (text.endsWith(".0")) text = text.slice(0, -2);

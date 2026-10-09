@@ -4,13 +4,13 @@
  */
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { Link, useQuery } from "@spacefast/zero/client";
-import { Skeleton } from "@spacefast/zero/kit";
-
 import { formatContext, money } from "../../shared/model";
-import { isAlias, modelName, providerName } from "../../shared/providers";
+import { isAlias, providerName } from "../../shared/providers";
 import { headlines, type Story } from "../../shared/stories";
 import type { ArchiveEvent, HomeModel, HomePageData, LifecycleRow, StatusRow } from "../../shared/types";
-import { Board, ColumnHeads, FlapRow, FlapText, Sign, type FlapColumn, type FlapTone } from "../components/Flap";
+import { Board, ColumnHeads, FlapRow, FlapText, Sign, type FlapTone } from "../components/Flap";
+import { LogDay, PageSkeleton, Stencil, StoryLine } from "../components/Log";
+import { boardDate, boardPct, boardTime, boardWhen, departureStatus, remarkWord, shortName, statusWord } from "../lib/board";
 import { uptimeDays, type DayState } from "../lib/series";
 import { KIND_GROUPS, assembleStories, deltaIsGood, keyIndex, kindInGroup, nameIndex, storyDelta, storyHref } from "../lib/stories";
 import { provideFreshness } from "../lib/freshness";
@@ -18,48 +18,11 @@ import { DAY, ago, dayLabel, daysUntil, modelHref, plural, readStorage, usePageT
 import { matchesWatch, useWatchlist } from "../lib/watch";
 
 const LAST_VISIT = "observatory.lastVisit";
-const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
-
-/** "09 OCT" from an ISO date or stamp. */
-function boardDate(iso: string): string {
-  const d = new Date(iso.length === 10 ? `${iso}T00:00:00Z` : iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return `${String(d.getUTCDate()).padStart(2, "0")} ${MONTHS[d.getUTCMonth()]}`;
-}
-
-function boardTime(iso: string): string {
-  return iso.length >= 16 ? iso.slice(11, 16) : "";
-}
-
-/** Today's rows show the time, older ones the date, like a real board. */
-function boardWhen(iso: string): string {
-  const today = new Date().toISOString().slice(0, 10);
-  return iso.slice(0, 10) === today ? boardTime(iso) : boardDate(iso);
-}
-
-/** "▲ +64%" / "▼ -43%" with a plain hyphen, since the flap wheel has no minus sign. */
-function boardPct(value: number): string {
-  const abs = Math.abs(value);
-  const text = abs >= 1000 ? `${Math.round(abs / 100)}X` : abs >= 10 ? `${Math.round(abs)}%` : `${abs.toFixed(1)}%`;
-  return `${value < 0 ? "▼ -" : "▲ +"}${text}`;
-}
-
-function shortName(modelId: string, name?: string): string {
-  return modelName(modelId, name).replace(/ \(alias\)$/, "");
-}
-
-const STATUS_WORD: Record<string, { word: string; tone: FlapTone }> = {
-  none: { word: "ON TIME", tone: "success" },
-  minor: { word: "DELAYED", tone: "warning" },
-  maintenance: { word: "DELAYED", tone: "warning" },
-  major: { word: "CANCELLED", tone: "danger" },
-  critical: { word: "CANCELLED", tone: "danger" },
-};
 
 const DAY_CLASS: Record<DayState, string> = { up: "bg-success", degraded: "bg-warning", down: "bg-danger", none: "bg-line" };
 
 /** One small flap per day, in the day's real colour; dim when nothing was recorded. */
-function UptimeStrip(props: { days: { day: string; state: DayState }[]; label: string }) {
+export function UptimeStrip(props: { days: { day: string; state: DayState }[]; label: string }) {
   return (
     <span class="inline-flex items-center gap-[2px]" role="img" aria-label={props.label}>
       {props.days.map((d) => (
@@ -104,61 +67,11 @@ function departures(rows: LifecycleRow[], models: HomeModel[], keys: Map<string,
       label: `${shortName(m.modelId, m.name)} leaves the catalogue on ${m.expirationDate}`,
     });
   }
-  return [...seen.values()].sort((a, b) => a.retiresAt.localeCompare(b.retiresAt));
-}
-
-function departureStatus(retiresAt: string): { word: string; tone: FlapTone } {
-  const days = daysUntil(retiresAt);
-  if (days < 0) return { word: "DEPARTED", tone: "danger" };
-  if (days <= 30) return { word: "FINAL CALL", tone: "warning" };
-  return { word: "BOARDING", tone: "success" };
-}
-
-/** A logbook line: time, the sentence, the numbers. Quiet on purpose; the boards do the shouting. */
-function LogRow(props: { story: Story; href: string | null }) {
-  const delta = storyDelta(props.story);
-  const tone = delta === null ? "" : deltaIsGood(props.story, delta) ? "text-success" : "text-warning";
-  const kind = props.story.kind;
-  const mark = kind === "delisted" || kind === "retired" || kind === "retiring" || kind === "expiring" ? "text-danger" : kind === "listed" || kind === "relisted" ? "text-success" : kind === "repointed" ? "text-warning" : "text-ink-muted";
-  return (
-    <li class="grid grid-cols-[3.5rem_1fr_auto] items-baseline gap-x-3 border-b border-dotted border-line py-1.5 last:border-0" data-feed-row>
-      <span class="font-mono text-xs tabular-nums text-ink-muted">{boardTime(props.story.at)}</span>
-      <span class="min-w-0">
-        {props.href ? (
-          <Link to={props.href} class="text-[15px] text-ink hover:text-accent">{props.story.headline}</Link>
-        ) : (
-          <span class="text-[15px] text-ink">{props.story.headline}</span>
-        )}
-        {props.story.detail ? <span class="ml-2 font-mono text-xs tabular-nums text-ink-muted">{props.story.detail}</span> : null}
-        {props.story.more.length ? <span class="ml-1 font-mono text-xs text-ink-muted/70">+{props.story.more.length}</span> : null}
-      </span>
-      <span class={`font-mono text-xs tabular-nums ${delta === null ? mark : tone}`}>
-        {delta !== null && (kind === "repriced" || kind === "resized") ? boardPct(delta) : kind === "delisted" ? "CANCELLED" : kind === "listed" ? "ARRIVED" : kind === "relisted" ? "RETURNED" : kind === "retiring" || kind === "expiring" ? "DEPARTING" : kind === "retired" ? "DEPARTED" : kind === "repointed" ? "REROUTED" : ""}
-      </span>
-    </li>
-  );
-}
-
-/** A small stencil toggle for the log's filters. */
-function Stencil(props: { active: boolean; href: string; children: string }) {
-  return (
-    <Link
-      to={props.href}
-      class={`rounded-sm border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.2em] ${props.active ? "border-accent text-accent" : "border-line text-ink-muted hover:border-ink-muted hover:text-ink"}`}
-      aria-current={props.active ? "true" : undefined}
-    >
-      {props.children}
-    </Link>
-  );
-}
-
-function Skeletons() {
-  return (
-    <div class="flex flex-col gap-6">
-      <Skeleton class="h-10 w-full max-w-3xl" />
-      {[0, 1, 2].map((i) => <Skeleton key={i} class="h-56 w-full rounded-md" />)}
-    </div>
-  );
+  // Upcoming first, soonest at the top; then the three most recently departed, for the record.
+  const all = [...seen.values()];
+  const upcoming = all.filter((d) => daysUntil(d.retiresAt) >= 0).sort((a, b) => a.retiresAt.localeCompare(b.retiresAt));
+  const departed = all.filter((d) => daysUntil(d.retiresAt) < 0).sort((a, b) => b.retiresAt.localeCompare(a.retiresAt)).slice(0, 3);
+  return [...upcoming, ...departed];
 }
 
 export function HomePage() {
@@ -187,7 +100,7 @@ export function HomePage() {
     [ready, page, names],
   );
 
-  if (!ready) return <Skeletons />;
+  if (!ready) return <PageSkeleton />;
 
   const now = Date.now();
   const today = new Date(now).toISOString().slice(0, 10);
@@ -201,7 +114,7 @@ export function HomePage() {
 
   // DEPARTURES
   const allLeaving = departures(page.retiring ?? [], models, keys);
-  const leaving = allLeaving.slice(0, 10);
+  const leaving = [...allLeaving.filter((d) => daysUntil(d.retiresAt) >= 0).slice(0, 10), ...allLeaving.filter((d) => daysUntil(d.retiresAt) < 0)];
   const departingSoon = allLeaving.filter((d) => { const days = daysUntil(d.retiresAt); return days >= 0 && days <= 30; }).length;
 
   // ARRIVALS
@@ -265,15 +178,17 @@ export function HomePage() {
         ) : (
           leaving.map((d, i) => {
             const status = departureStatus(d.retiresAt);
+            const gone = status.word === "DEPARTED";
             return (
               <FlapRow
                 key={d.key}
                 href={d.href}
                 label={d.label}
                 delay={i * 40}
+                class={gone ? "opacity-60" : ""}
                 columns={[
                   { text: boardDate(d.retiresAt), width: 6, sticky: true, tone: "muted" },
-                  { text: d.model, width: 22, sticky: true },
+                  { text: d.model, width: 22, sticky: true, tone: gone ? "danger" : "ink" },
                   { text: d.provider, width: 9, tone: "muted" },
                   { text: d.replacement ? d.replacement : "-", width: 16, tone: d.replacement ? "ink" : "muted" },
                   { text: status.word, width: 10, tone: status.tone },
@@ -363,14 +278,14 @@ export function HomePage() {
 
       {/* STATUS */}
       <Board label="Status" hint="from each provider's own status page" action={<Sign to="/status">Full status</Sign>}>
-        <ColumnHeads columns={[{ label: "Provider", width: 12, sticky: true }, { label: "Status", width: 9 }, { label: "Remarks", width: 22 }, { label: "Last 45 days", width: 24 }]} />
+        <ColumnHeads columns={[{ label: "Provider", width: 11, sticky: true }, { label: "Status", width: 9 }, { label: "Remarks", width: 28 }, { label: "Last 45 days", width: 24 }]} />
         {statuses.length === 0 ? (
           <p class="px-3 py-4 text-sm text-ink-muted">No status checks yet.</p>
         ) : (
           statuses.map((s, i) => {
-            const spec = STATUS_WORD[s.indicator] ?? { word: "NO INFO", tone: "muted" as FlapTone };
+            const spec = statusWord(s.indicator);
             const days = uptimeDays(s, page.statusEvents.filter((e) => e.provider === s.provider), page.incidents.filter((inc) => inc.provider === s.provider), 45);
-            const remarks = s.indicator === "unreachable" ? "STATUS PAGE UNREACHABLE" : s.description || "";
+            const remarks = remarkWord(s.indicator, s.description);
             return (
               <FlapRow
                 key={s.id}
@@ -378,9 +293,9 @@ export function HomePage() {
                 label={`${providerName(s.provider)}: ${spec.word.toLowerCase()}. ${remarks}`}
                 delay={i * 40}
                 columns={[
-                  { text: providerName(s.provider), width: 12, sticky: true },
+                  { text: providerName(s.provider), width: 11, sticky: true },
                   { text: spec.word, width: 9, tone: spec.tone },
-                  { text: remarks, width: 22, tone: "muted" },
+                  { text: remarks, width: 28, tone: "muted" },
                   { text: "", width: 24, render: <UptimeStrip days={days} label={`${providerName(s.provider)} over the last 45 days`} /> },
                 ]}
               />
@@ -405,9 +320,7 @@ export function HomePage() {
         ) : (
           [...byDay.entries()].map(([day, list]) => (
             <div key={day}>
-              <h3 class="sticky top-0 z-10 bg-canvas/95 py-1 text-[11px] font-semibold uppercase tracking-[0.3em] text-accent backdrop-blur">
-                {dayLabel(day)} <span class="font-normal text-ink-muted">· {plural(list.length, "entry", "entries")}</span>
-              </h3>
+              <LogDay>{dayLabel(day)} <span class="font-normal text-ink-muted">· {plural(list.length, "entry", "entries")}</span></LogDay>
               <ul>
                 {list.map((s) => {
                   const divider = !dividerPlaced && lastVisit && s.at < lastVisit;
@@ -415,7 +328,7 @@ export function HomePage() {
                   return (
                     <div key={s.key}>
                       {divider ? <li class="flex items-center gap-2 py-1 text-[11px] uppercase tracking-[0.2em] text-accent"><span class="h-px flex-1 bg-accent/40" />new since your last visit ({ago(lastVisit)})<span class="h-px flex-1 bg-accent/40" /></li> : null}
-                      <LogRow story={s} href={storyHref(s, keys)} />
+                      <StoryLine story={s} href={storyHref(s, keys)} />
                     </div>
                   );
                 })}

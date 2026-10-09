@@ -1,15 +1,16 @@
 /**
- * Every provider's status with a 90-day bar, and the incident log beneath.
+ * The full status board, 90 days per provider, and the incident log beneath, by day.
  */
 import { Link, useQuery } from "@spacefast/zero/client";
-import { Badge, EmptyState, Skeleton } from "@spacefast/zero/kit";
 
 import { providerName } from "../../shared/providers";
 import type { ModelRow, StatusPageData } from "../../shared/types";
-import { Card, ProviderLink, Section } from "../components/bits";
-import { UptimeBar } from "../components/UptimeBar";
+import { Board, ColumnHeads, FlapRow, Sign } from "../components/Flap";
+import { BoardEmpty, LogDay, LogLine, LogSection, Marquee, PageSkeleton } from "../components/Log";
+import { boardTime, remarkWord, statusWord } from "../lib/board";
 import { uptimeDays, uptimeSummary } from "../lib/series";
 import { ago, dayLabel, isLoading, plural, providerHref, usePageTitle } from "../lib/util";
+import { UptimeStrip } from "./Home";
 
 export function StatusPage() {
   usePageTitle("Status");
@@ -19,7 +20,7 @@ export function StatusPage() {
   const providers = [...new Set((models ?? []).map((m) => m.provider.replace(/^~/, "")))].sort((a, b) => providerName(a).localeCompare(providerName(b)));
   const tracked = new Set(loading ? [] : data.statuses.map((s) => s.provider));
 
-  if (loading) return <div class="flex flex-col gap-3"><Skeleton class="h-10 w-1/3" /><Skeleton class="h-40 w-full" /></div>;
+  if (loading) return <PageSkeleton />;
 
   const incidents = data.incidents.slice().sort((a, b) => b.startedAt.localeCompare(a.startedAt));
   const byDay = new Map<string, typeof incidents>();
@@ -31,74 +32,69 @@ export function StatusPage() {
   }
 
   return (
-    <div class="flex flex-col gap-10">
-      <Section title="Is it up right now" hint="from each provider's own status page, checked every half hour">
-        <Card padded={false}>
-          <ul class="divide-y divide-line">
-            {data.statuses.map((s) => {
-              const days = uptimeDays(s, data.statusEvents.filter((e) => e.provider === s.provider), data.incidents.filter((i) => i.provider === s.provider), 90);
-              const sum = uptimeSummary(days);
-              const tone = s.indicator === "none" ? "success" : s.indicator === "minor" ? "warning" : s.indicator === "major" || s.indicator === "critical" ? "danger" : "neutral";
-              const word = s.indicator === "none" ? "up" : s.indicator === "minor" ? "degraded" : s.indicator === "major" || s.indicator === "critical" ? "outage" : s.indicator === "unreachable" ? "status page unreachable" : s.indicator;
-              return (
-                <li key={s.id} class="grid items-center gap-x-6 gap-y-2 px-4 py-3 md:grid-cols-[12rem_1fr_8rem]">
-                  <div class="flex flex-col">
-                    <ProviderLink slug={s.provider} class="text-base font-medium text-ink" />
-                    <span class="text-xs text-ink-muted">{s.description || word} · checked {ago(s.checkedAt)}</span>
-                  </div>
-                  <UptimeBar days={days} label={providerName(s.provider)} />
-                  <div class="flex items-center gap-2 md:justify-end">
-                    <Badge tone={tone}>{word}</Badge>
-                    {sum.recorded ? <span class="font-mono text-xs tabular-nums text-ink-muted" title={`${sum.incidentDays} incident days of ${sum.recorded} recorded`}>{sum.incidentDays}/{sum.recorded}</span> : null}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        </Card>
-        <p class="text-xs text-ink-muted">
-          Only providers with a machine-readable status page are checked. Hollow bars mean no record for that day, never an assumption of uptime. Amber is a degraded day, red a day with an outage; the count beside each badge is incident days out of recorded days.
-        </p>
-      </Section>
+    <div class="flex flex-col gap-8">
+      <Marquee title="Status" action={<><Sign to="/providers">All providers</Sign><Sign href="/api/status.json">JSON</Sign></>}>
+        From each provider's own status page, checked every half hour. A dim day is one with no record, never an assumption of uptime.
+      </Marquee>
 
-      <Section title="Incidents" hint={incidents.length ? `${plural(incidents.length, "incident")} in 90 days` : "last 90 days"}>
-        <Card padded={false} class="px-4">
-          {incidents.length === 0 ? (
-            <EmptyState title="No incidents recorded" description="Incident history fills as status pages report them." />
-          ) : (
-            [...byDay.entries()].map(([day, list]) => (
-              <div key={day}>
-                <h3 class="border-b border-line py-1.5 text-xs font-medium text-ink-muted">{dayLabel(day)}</h3>
-                <ul>
-                  {list.map((i) => (
-                    <li key={i.id} class="flex flex-wrap items-center gap-2 border-b border-line py-2 text-sm last:border-0">
-                      <ProviderLink slug={i.provider} class="w-28 shrink-0 text-ink-muted" />
-                      <Badge tone={i.impact === "critical" || i.impact === "major" ? "danger" : i.impact === "minor" ? "warning" : "neutral"}>{i.impact || "incident"}</Badge>
-                      {i.url ? <a href={i.url} target="_blank" rel="noopener" class="text-ink hover:text-accent">{i.name}</a> : <span class="text-ink">{i.name}</span>}
-                      <span class="ml-auto font-mono text-xs text-ink-muted">
-                        {i.resolvedAt ? `${Math.max(1, Math.round((Date.parse(i.resolvedAt) - Date.parse(i.startedAt)) / 60000))} min` : i.status === "resolved" ? "resolved" : `ongoing · started ${ago(i.startedAt)}`}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))
-          )}
-        </Card>
-      </Section>
+      <Board label="Status" hint="last 90 days">
+        <ColumnHeads columns={[{ label: "Provider", width: 11, sticky: true }, { label: "Status", width: 9 }, { label: "Remarks", width: 16 }, { label: "Last 90 days", width: 48 }, { label: "Days", width: 6, align: "right" }]} />
+        {data.statuses.map((s, i) => {
+          const days = uptimeDays(s, data.statusEvents.filter((e) => e.provider === s.provider), data.incidents.filter((inc) => inc.provider === s.provider), 90);
+          const sum = uptimeSummary(days);
+          const spec = statusWord(s.indicator);
+          const remarks = remarkWord(s.indicator, s.description);
+          return (
+            <FlapRow
+              key={s.id}
+              href={providerHref(s.provider)}
+              label={`${providerName(s.provider)}: ${spec.word.toLowerCase()}. ${remarks}. ${sum.recorded === 0 ? "No record yet" : `${sum.incidentDays} incident days of ${sum.recorded} recorded`}. Checked ${ago(s.checkedAt)}.`}
+              delay={i * 40}
+              columns={[
+                { text: providerName(s.provider), width: 11, sticky: true },
+                { text: spec.word, width: 9, tone: spec.tone },
+                { text: remarks, width: 16, tone: "muted" },
+                { text: "", width: 48, render: <UptimeStrip days={days} label={`${providerName(s.provider)} over the last 90 days`} /> },
+                { text: sum.recorded ? `${sum.incidentDays}/${sum.recorded}` : "-", width: 6, align: "right", tone: sum.incidentDays ? "warning" : "muted" },
+              ]}
+            />
+          );
+        })}
+        <p class="px-3 py-2 text-xs text-ink-muted">Amber is a degraded day, red a day with an outage; "days" is incident days out of recorded days.</p>
+      </Board>
 
-      <Section title="All providers" hint={isLoading(models) ? undefined : `${providers.length} with models listed`}>
-        <ul class="flex flex-wrap gap-2">
+      <LogSection title="Incidents" hint={incidents.length ? `${plural(incidents.length, "incident")} in 90 days` : "last 90 days"}>
+        {incidents.length === 0 ? (
+          <BoardEmpty>No incidents recorded. The log fills as status pages report them.</BoardEmpty>
+        ) : (
+          [...byDay.entries()].map(([day, list]) => (
+            <div key={day}>
+              <LogDay>{dayLabel(day)}</LogDay>
+              <ul>
+                {list.map((i) => (
+                  <LogLine
+                    key={i.id}
+                    left={boardTime(i.startedAt)}
+                    right={<span class={i.impact === "critical" || i.impact === "major" ? "text-danger" : i.impact === "minor" ? "text-warning" : "text-ink-muted"}>{i.resolvedAt ? `${Math.max(1, Math.round((Date.parse(i.resolvedAt) - Date.parse(i.startedAt)) / 60000))} MIN` : i.status === "resolved" ? "RESOLVED" : `ONGOING · STARTED ${ago(i.startedAt).toUpperCase()}`}</span>}
+                  >
+                    <Link to={providerHref(i.provider)} class="mr-2 text-ink-muted hover:text-accent">{providerName(i.provider)}</Link>
+                    <span class="mr-2 text-[10px] uppercase tracking-[0.2em] text-ink-muted">{i.impact || "incident"}</span>
+                    {i.url ? <a href={i.url} target="_blank" rel="noopener" class="hover:text-accent">{i.name}</a> : i.name}
+                  </LogLine>
+                ))}
+              </ul>
+            </div>
+          ))
+        )}
+      </LogSection>
+
+      <LogSection title="Every provider" hint={isLoading(models) ? undefined : `${providers.length} with models listed`}>
+        <ul class="flex flex-wrap gap-1.5">
           {providers.map((p) => (
-            <li key={p}>
-              <Link to={providerHref(p)} class={`inline-flex items-center gap-1.5 rounded-full border border-line px-3 py-1 text-sm hover:border-ink-muted ${tracked.has(p) ? "text-ink" : "text-ink-muted"}`}>
-                {tracked.has(p) ? <span class="inline-block size-1.5 rounded-full bg-success" aria-hidden="true" /> : null}
-                {providerName(p)}
-              </Link>
-            </li>
+            <li key={p}><Sign to={providerHref(p)} active={false} class={tracked.has(p) ? "text-ink" : ""}>{providerName(p)}</Sign></li>
           ))}
         </ul>
-      </Section>
+      </LogSection>
     </div>
   );
 }

@@ -1,34 +1,36 @@
 /**
- * Up to four models side by side: the spec table with the best cell marked, overlaid price
+ * Up to four models side by side: the spec board with the best cell lit green, overlaid price
  * history, and one merged timeline.
  */
 import { useMemo } from "preact/hooks";
-import { Link, useNavigate, useQuery } from "@spacefast/zero/client";
-import { Button, EmptyState, Icon } from "@spacefast/zero/kit";
+import { useNavigate, useQuery } from "@spacefast/zero/client";
 
 import { formatContext, money } from "../../shared/model";
 import { modelName, providerName } from "../../shared/providers";
 import type { CompareData, ModelRow } from "../../shared/types";
-import { Card, DeltaChip, ModelLink, Section } from "../components/bits";
+import { Board, ColumnHeads, FlapRow, Sign, type FlapColumn } from "../components/Flap";
+import { BoardEmpty, LogSection, Marquee, PageSkeleton, Plaque, StoryLine } from "../components/Log";
 import { StepChart, type StepSeries } from "../components/StepChart";
-import { StoryRow } from "../components/StoryRow";
+import { boardDate, boardPct, shortName } from "../lib/board";
 import { openPalette } from "../lib/palette";
 import { stepSeries } from "../lib/series";
 import { assembleStories, keyIndex, nameIndex, storyHref } from "../lib/stories";
 import { DAY, compareHref, isLoading, longDate, modelHref, pctChange, usePageTitle, useSearchParams } from "../lib/util";
 
-type Spec = { label: string; value: (m: ModelRow) => number | null; show: (m: ModelRow) => string; lowerIsBetter: boolean };
+type Spec = { label: string; value: (m: ModelRow) => number | null; show: (m: ModelRow) => string; lowerIsBetter: boolean; gap: boolean };
 
 const SPECS: Spec[] = [
-  { label: "Input $/M", value: (m) => (m.promptPrice ? Number(m.promptPrice) * 1e6 : null), show: (m) => money(m.promptPrice), lowerIsBetter: true },
-  { label: "Output $/M", value: (m) => (m.completionPrice ? Number(m.completionPrice) * 1e6 : null), show: (m) => money(m.completionPrice), lowerIsBetter: true },
-  { label: "Cache read $/M", value: (m) => (m.cacheReadPrice ? Number(m.cacheReadPrice) * 1e6 : null), show: (m) => (m.cacheReadPrice ? money(m.cacheReadPrice) : "–"), lowerIsBetter: true },
-  { label: "Context", value: (m) => Number(m.contextLength) || null, show: (m) => formatContext(m.contextLength), lowerIsBetter: false },
-  { label: "Max output", value: (m) => Number(m.maxCompletion) || null, show: (m) => formatContext(m.maxCompletion), lowerIsBetter: false },
-  { label: "Intelligence index", value: (m) => (m.aaIntelligence ? Number(m.aaIntelligence) : null), show: (m) => m.aaIntelligence || "–", lowerIsBetter: false },
-  { label: "Listed", value: (m) => Date.parse(m.firstSeenAt) || null, show: (m) => longDate(m.firstSeenAt), lowerIsBetter: false },
-  { label: "Changes recorded", value: (m) => Number(m.changeCount) || 0, show: (m) => m.changeCount || "0", lowerIsBetter: true },
+  { label: "Input $/M", value: (m) => (m.promptPrice ? Number(m.promptPrice) * 1e6 : null), show: (m) => money(m.promptPrice), lowerIsBetter: true, gap: true },
+  { label: "Output $/M", value: (m) => (m.completionPrice ? Number(m.completionPrice) * 1e6 : null), show: (m) => money(m.completionPrice), lowerIsBetter: true, gap: true },
+  { label: "Cache $/M", value: (m) => (m.cacheReadPrice ? Number(m.cacheReadPrice) * 1e6 : null), show: (m) => (m.cacheReadPrice ? money(m.cacheReadPrice) : "-"), lowerIsBetter: true, gap: true },
+  { label: "Context", value: (m) => Number(m.contextLength) || null, show: (m) => formatContext(m.contextLength), lowerIsBetter: false, gap: true },
+  { label: "Max out", value: (m) => Number(m.maxCompletion) || null, show: (m) => formatContext(m.maxCompletion), lowerIsBetter: false, gap: true },
+  { label: "Index", value: (m) => (m.aaIntelligence ? Number(m.aaIntelligence) : null), show: (m) => m.aaIntelligence || "-", lowerIsBetter: false, gap: true },
+  { label: "Listed", value: (m) => Date.parse(m.firstSeenAt) || null, show: (m) => boardDate(m.firstSeenAt) + " " + m.firstSeenAt.slice(0, 4), lowerIsBetter: false, gap: false },
+  { label: "Changes", value: (m) => Number(m.changeCount) || 0, show: (m) => m.changeCount || "0", lowerIsBetter: true, gap: false },
 ];
+
+const COL = 14;
 
 export function ComparePage() {
   usePageTitle("Compare");
@@ -54,85 +56,60 @@ export function ComparePage() {
 
   return (
     <div class="flex flex-col gap-8">
-      <Section title="Compare" hint="up to four models side by side">
-        <div class="flex flex-wrap items-center gap-2">
-          {models.map((m) => (
-            <span key={m.modelId} class="inline-flex items-center gap-1 rounded-full border border-line bg-surface py-1 pr-1 pl-3 text-sm">
-              <ModelLink modelId={m.modelId} name={m.name} withProvider />
-              <button type="button" class="rounded-full p-0.5 text-ink-muted hover:bg-ink/10 hover:text-ink" onClick={() => remove(m.modelId)} aria-label={`Remove ${m.name}`}><Icon name="x" size="sm" /></button>
-            </span>
-          ))}
-          {ids.length < 4 ? <Button variant="outline" size="sm" icon="plus" onClick={pick}>Add a model</Button> : null}
-        </div>
-        {ids.length === 0 ? (
-          <EmptyState title="Pick two or more models" description="Search for a model to start. The table marks the best value in each row." icon="search" action={<Button onClick={pick}>Choose a model</Button>} />
-        ) : models.length === 0 && !loading ? (
-          <EmptyState title="None of those ids are tracked" action={<Button onClick={pick}>Choose a model</Button>} />
-        ) : (
-          <Card padded={false}>
-            <div class="overflow-x-auto">
-              <table class="w-full text-sm">
-                <thead>
-                  <tr class="border-b border-line text-left text-xs text-ink-muted">
-                    <th class="sticky left-0 bg-surface px-4 py-2 font-normal">spec</th>
-                    {models.map((m) => (
-                      <th key={m.modelId} class="px-3 py-2 font-normal">
-                        <Link to={modelHref(m.modelId)} class="text-ink hover:text-accent">{modelName(m.modelId, m.name)}</Link>
-                        <span class="block text-[11px] text-ink-muted">{providerName(m.provider)}</span>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {SPECS.map((spec) => {
-                    const values = models.map((m) => spec.value(m));
-                    const known = values.filter((v): v is number => v !== null);
-                    const best = known.length > 1 ? (spec.lowerIsBetter ? Math.min(...known) : Math.max(...known)) : null;
-                    return (
-                      <tr key={spec.label} class="border-b border-line last:border-0">
-                        <td class="sticky left-0 bg-surface px-4 py-2 text-xs text-ink-muted">{spec.label}</td>
-                        {models.map((m, i) => {
-                          const v = values[i];
-                          const isBest = best !== null && v === best;
-                          const gap = best !== null && v !== null && !isBest && spec.label !== "Listed" ? pctChange(best, v) : null;
-                          return (
-                            <td key={m.modelId} class={`px-3 py-2 font-mono tabular-nums ${isBest ? "bg-success/10 text-success" : "text-ink"}`}>
-                              {spec.show(m)}
-                              {gap !== null && Math.abs(gap) >= 1 ? (
-                                <span class="ml-2">
-                                  {gap > 300 ? (
-                                    <span class="inline-flex items-center rounded-md bg-warning/15 px-1.5 py-0 font-mono text-[11px] font-medium tabular-nums text-warning" title="versus the best in this row">×{Math.round(gap / 100 + 1)} {spec.lowerIsBetter ? "more" : "less"}</span>
-                                  ) : (
-                                    <DeltaChip value={gap} good={spec.lowerIsBetter ? gap < 0 : gap > 0} size="sm" title="versus the best in this row" />
-                                  )}
-                                </span>
-                              ) : null}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-        )}
-      </Section>
+      <Marquee title="Compare" action={ids.length < 4 ? <Sign onClick={pick}>+ Add a model</Sign> : undefined}>
+        Up to four models side by side. The best value in each row is lit green; the others say how far behind they are.
+      </Marquee>
 
-      {models.length ? (
+      <div class="flex flex-wrap items-center gap-1.5">
+        {models.map((m) => (
+          <span key={m.modelId} class="inline-flex items-center gap-1">
+            <Sign to={modelHref(m.modelId)}>{providerName(m.provider)} {shortName(m.modelId, m.name)}</Sign>
+            <Sign onClick={() => remove(m.modelId)} ariaLabel={`Remove ${m.name}`}>×</Sign>
+          </span>
+        ))}
+        {ids.length === 0 ? <Sign onClick={pick} active>Choose a model</Sign> : null}
+      </div>
+
+      {ids.length > 0 && loading ? <PageSkeleton /> : null}
+      {ids.length === 0 ? (
+        <BoardEmpty>Pick two or more models to start</BoardEmpty>
+      ) : models.length === 0 && !loading ? (
+        <BoardEmpty>None of those ids are tracked</BoardEmpty>
+      ) : models.length ? (
         <>
-          <Section title="Input price history" hint="$ per million tokens">
-            <Card><StepChart series={series} from={earliest} /></Card>
-          </Section>
-          <Section title="What changed" hint="all of them, newest first">
-            <Card padded={false} class="px-4">
-              {stories.length === 0 ? <EmptyState title="No changes recorded" /> : (
-                <ul>{stories.filter((s) => s.kind !== "drift").slice(0, 60).map((s) => <StoryRow key={s.key} story={s} href={storyHref(s, keys)} compact />)}</ul>
-              )}
-            </Card>
-          </Section>
-          <p class="text-xs text-ink-muted">Share this comparison: <code class="font-mono">{`https://ai-observatory.view.fast${compareHref(ids)}`}</code></p>
+          <Board label="Side by side" hint="best in each row lit green">
+            <ColumnHeads columns={[{ label: "Spec", width: 10, sticky: true }, ...models.map((m) => ({ label: shortName(m.modelId, m.name), width: COL }))]} />
+            {SPECS.map((spec, i) => {
+              const values = models.map((m) => spec.value(m));
+              const known = values.filter((v): v is number => v !== null);
+              const best = known.length > 1 ? (spec.lowerIsBetter ? Math.min(...known) : Math.max(...known)) : null;
+              const columns: FlapColumn[] = [{ text: spec.label, width: 10, sticky: true, tone: "muted" }];
+              const words: string[] = [];
+              models.forEach((m, j) => {
+                const v = values[j];
+                const isBest = best !== null && v === best;
+                const gap = best !== null && v !== null && !isBest && spec.gap ? pctChange(best, v) : null;
+                const gapText = gap !== null && Math.abs(gap) >= 1 ? (Math.abs(gap) > 300 ? ` ${Math.round(Math.abs(gap) / 100 + 1)}X` : ` ${boardPct(gap).replace(/[▲▼] /, "")}`) : "";
+                columns.push({ text: `${spec.show(m)}${gapText}`, width: COL, tone: isBest ? "success" : gap !== null && Math.abs(gap) >= 1 ? "warning" : "ink" });
+                words.push(`${shortName(m.modelId, m.name)} ${spec.show(m)}${isBest ? " (best)" : gapText ? ` (${gapText.trim()} ${spec.lowerIsBetter ? "more" : "less"})` : ""}`);
+              });
+              return <FlapRow key={spec.label} label={`${spec.label}: ${words.join("; ")}`} delay={i * 40} columns={columns} />;
+            })}
+          </Board>
+
+          <LogSection title="Input price history" hint="$ per million tokens">
+            <StepChart series={series} from={earliest} />
+          </LogSection>
+          <LogSection title="What changed" hint="all of them, newest first">
+            {stories.length === 0 ? <BoardEmpty>No changes recorded</BoardEmpty> : (
+              <ul>{stories.filter((s) => s.kind !== "drift").slice(0, 60).map((s) => <StoryLine key={s.key} story={s} href={storyHref(s, keys)} date />)}</ul>
+            )}
+          </LogSection>
+          <Plaque>
+            <span class="text-[11px] font-bold uppercase tracking-[0.3em] text-accent">Share this comparison</span>
+            <span class="ml-3 font-mono text-xs text-ink">{`https://ai-observatory.view.fast${compareHref(ids)}`}</span>
+            <span class="ml-3 text-xs text-ink-muted">Listed {models.map((m) => `${shortName(m.modelId, m.name)} ${longDate(m.firstSeenAt)}`).join(" · ")}</span>
+          </Plaque>
         </>
       ) : null}
     </div>

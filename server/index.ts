@@ -22,6 +22,7 @@ import {
   foldAliases,
   foldDrift,
   foldFlapping,
+  foldVolatile,
   groupStories,
   hostStories,
   lifecycleStories,
@@ -1447,21 +1448,21 @@ ${entries}
       const model = await ctx.db.models.withIndex("by_model", (range) => range.eq("modelId", id)).first();
       let label = "ai observatory";
       let value = "unknown model";
-      let color = "#8a94a8";
+      let color = "#8f8a7a";
       if (model) {
         const short = modelName(String(model.modelId), String(model.name));
         if (metric === "output") {
           label = `${short} · output`;
           value = `${money(String(model.completionPrice))}/M`;
-          color = "#6ea8ff";
+          color = "#ffb000";
         } else if (metric === "context") {
           label = `${short} · context`;
           value = `${formatContext(String(model.contextLength))} tokens`;
-          color = "#6ea8ff";
+          color = "#ffb000";
         } else if (metric === "changed") {
           label = `${short} · last change`;
           value = model.lastChangedAt ? `${daysBetween(String(model.lastChangedAt), now())}d ago` : "never";
-          color = "#3ddc84";
+          color = "#7df0a1";
         } else if (metric === "retires") {
           const key = canonicalKey(String(model.provider), id);
           const notices = await ctx.db.lifecycle.withIndex("by_key", (range) => range.eq("key", key)).collect();
@@ -1469,13 +1470,13 @@ ${entries}
           const when = dated ? String(dated.retiresAt) : String(model.expirationDate ?? "");
           label = `${short} · retires`;
           value = when ? (when > now().slice(0, 10) ? `in ${daysBetween(now(), when)}d` : "retired") : model.active ? "no date" : "removed";
-          color = when ? "#ff5c5c" : "#3ddc84";
+          color = when ? "#ff5a4a" : "#7df0a1";
         } else {
           label = `${short} · input`;
           value = `${money(String(model.promptPrice))}/M`;
-          color = "#6ea8ff";
+          color = "#ffb000";
         }
-        if (model.active === false) color = "#ff5c5c";
+        if (model.active === false) color = "#ff5a4a";
       }
       return text(badgeSvg(label, value, color), { headers: { "Content-Type": "image/svg+xml; charset=utf-8", "Cache-Control": "public, max-age=1800", "Access-Control-Allow-Origin": "*" } });
     }),
@@ -1990,7 +1991,7 @@ async function filteredStories(ctx: Ctx, params: URLSearchParams, limit: number)
     id: r.id, at: r.at, kind: r.kind, modelId: r.key, provider: r.provider, field: r.field, oldValue: r.oldValue, newValue: r.newValue, source: r.source,
   }));
   const keyOf = (s: Story) => (s.source ? s.modelId : canonicalKey(s.provider, s.modelId));
-  let stories = corroborate(foldFlapping(foldAliases(foldDrift(groupStories([...events, ...fromSources], names)))), keyOf)
+  let stories = corroborate(foldVolatile(foldFlapping(foldAliases(foldDrift(groupStories([...events, ...fromSources], names))))), keyOf)
     .filter((s) => !s.source)
     .concat(foldDrift(hostStories(hostEvents, names)), lifecycleStories(lifecycleEvents));
   for (const s of stories) if (s.source && s.source !== "hosts" && keyToModel.has(s.modelId)) s.modelId = keyToModel.get(s.modelId) as string;
@@ -2043,10 +2044,10 @@ function badgeSvg(label: string, value: string, color: string): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${lw + vw}" height="20" role="img" aria-label="${escapeXml(label)}: ${escapeXml(value)}">
 <title>${escapeXml(label)}: ${escapeXml(value)}</title>
 <clipPath id="r"><rect width="${lw + vw}" height="20" rx="3" fill="#fff"/></clipPath>
-<g clip-path="url(#r)"><rect width="${lw}" height="20" fill="#2b3244"/><rect x="${lw}" width="${vw}" height="20" fill="${color}"/></g>
-<g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11">
-<text x="${lw / 2}" y="14" fill="#fff">${escapeXml(label)}</text>
-<text x="${lw + vw / 2}" y="14" fill="#0b0e14" font-weight="bold">${escapeXml(value)}</text>
+<g clip-path="url(#r)"><rect width="${lw}" height="20" fill="#1f1f1f"/><rect x="${lw}" width="${vw}" height="20" fill="${color}"/></g>
+<g text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11">
+<text x="${lw / 2}" y="14" fill="#f3e9cf">${escapeXml(label)}</text>
+<text x="${lw + vw / 2}" y="14" fill="#090909" font-weight="bold">${escapeXml(value)}</text>
 </g></svg>`;
 }
 
@@ -2054,14 +2055,14 @@ function badgeSvg(label: string, value: string, color: string): string {
 function card(title: string, line: string, sub: string, footer: string) {
   const element = h(
     "div",
-    { tw: "flex flex-col w-full h-full p-16 justify-between", style: { backgroundColor: "#0b0e14", color: "#e7ebf3" } },
+    { tw: "flex flex-col w-full h-full p-16 justify-between", style: { backgroundColor: "#090909", color: "#f3e9cf" } },
     h("div", { tw: "flex flex-col" },
-      h("div", { tw: "text-3xl mb-6", style: { color: "#6ea8ff" } }, "AI Observatory"),
-      h("div", { tw: "text-6xl font-bold leading-tight" }, title.length > 90 ? `${title.slice(0, 87)}…` : title),
-      line ? h("div", { tw: "text-3xl mt-6", style: { color: "#8a94a8" } }, line.length > 110 ? `${line.slice(0, 107)}…` : line) : null,
+      h("div", { tw: "text-3xl mb-6 font-bold", style: { color: "#ffb000", letterSpacing: "0.3em" } }, "AI OBSERVATORY"),
+      h("div", { tw: "text-6xl font-bold leading-tight uppercase" }, title.length > 90 ? `${title.slice(0, 87)}…` : title),
+      line ? h("div", { tw: "text-3xl mt-6", style: { color: "#8f8a7a" } }, line.length > 110 ? `${line.slice(0, 107)}…` : line) : null,
       sub ? h("div", { tw: "text-3xl mt-3" }, sub.length > 110 ? `${sub.slice(0, 107)}…` : sub) : null
     ),
-    h("div", { tw: "flex justify-between text-2xl", style: { color: "#8a94a8" } },
+    h("div", { tw: "flex justify-between text-2xl", style: { color: "#8f8a7a" } },
       h("div", {}, footer),
       h("div", {}, "ai-observatory.view.fast")
     )

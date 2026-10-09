@@ -7,6 +7,7 @@ import {
   foldAliases,
   foldDrift,
   foldFlapping,
+  foldVolatile,
   groupStories,
   hostStories,
   lifecycleStories,
@@ -65,7 +66,8 @@ export type StoryInputs = {
 /** Every story, newest first, with the noise folded and cross-source confirmations marked. */
 export function assembleStories(input: StoryInputs): Story[] {
   const archive = [...(input.events ?? []), ...asArchive(input.sourceEvents)];
-  const base = corroborate(foldFlapping(foldAliases(foldDrift(groupStories(archive, input.names)))), keyOf);
+  // Volatile models (six or more repricings in a week) collapse to one dim line after the flap fold.
+  const base = corroborate(foldVolatile(foldFlapping(foldAliases(foldDrift(groupStories(archive, input.names))))), keyOf);
   const hosts = input.hostEvents?.length ? hostStories(input.hostEvents, input.names) : [];
   const lifecycle = input.lifecycleEvents?.length ? lifecycleStories(input.lifecycleEvents) : [];
   return sortStories([...base, ...hosts, ...lifecycle]);

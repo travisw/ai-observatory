@@ -165,7 +165,16 @@ function buildStory(events: ArchiveEvent[], names: Map<string, string>): Story {
   let score = 10;
   let headline = "";
 
-  if (prices.length) {
+  // A negative price means "billed as whatever model answers"; a move into or out of that is a
+  // change of pricing model, not a percentage anyone can quote.
+  const variable = prices.some((e) => Number(e.oldValue) < 0 || Number(e.newValue) < 0);
+  if (variable) {
+    const nowVariable = prices.some((e) => Number(e.newValue) < 0);
+    for (const e of prices) more.push(priceMove(e));
+    kind = "repriced";
+    score = 25;
+    headline = nowVariable ? `${model} pricing is now variable` : `${provider} gave ${model} a fixed price`;
+  } else if (prices.length) {
     const lead = prices.find((e) => e.field === "promptPrice") ?? prices.find((e) => e.field === "completionPrice") ?? prices[0];
     const quoted = prices.filter((e) => e.field === "promptPrice" || e.field === "completionPrice");
     const moves = quoted.length ? quoted.map((e) => pct(e.oldValue, e.newValue)) : prices.map((e) => pct(e.oldValue, e.newValue));
@@ -319,6 +328,62 @@ export function foldAliases(stories: Story[]): Story[] {
   return stories.filter(
     (s) => !isAlias(s.modelId) || s.kind === "listed" || s.kind === "delisted" || s.kind === "repointed" || !concrete.has(signature(s))
   );
+}
+
+/** This many repricings of one model inside a week is routing churn, not a pricing decision. */
+export const VOLATILE_PER_WEEK = 6;
+
+/**
+ * Folds a model's repricings into one line when it has been repriced this often within a week.
+ * A model whose price moves six times in seven days is being routed between hosts, and each
+ * move is noise to a reader; one "volatile" line keeps the fact without the flood.
+ */
+export function foldVolatile(stories: Story[]): Story[] {
+  const WEEK = 7 * 86_400_000;
+  const byModel = new Map<string, Story[]>();
+  for (const s of stories) {
+    if (s.source || (s.kind !== "repriced" && s.kind !== "drift")) continue;
+    const list = byModel.get(s.modelId);
+    if (list) list.push(s);
+    else byModel.set(s.modelId, [s]);
+  }
+  const dropped = new Set<string>();
+  const replaced = new Map<string, Story>();
+  for (const group of byModel.values()) {
+    const ordered = [...group].sort((a, b) => b.at.localeCompare(a.at));
+    let i = 0;
+    while (i < ordered.length) {
+      const windowEnd = Date.parse(ordered[i].at);
+      const run = ordered.filter((s) => windowEnd - Date.parse(s.at) <= WEEK && Date.parse(s.at) <= windowEnd && !dropped.has(s.key));
+      const priced = run.filter((s) => s.kind === "repriced");
+      if (priced.length < VOLATILE_PER_WEEK) {
+        i++;
+        continue;
+      }
+      const inputs = run
+        .flatMap((s) => s.events.filter((e) => e.field === "promptPrice"))
+        .flatMap((e) => [Number(e.oldValue), Number(e.newValue)])
+        .filter((v) => Number.isFinite(v) && v > 0);
+      const low = inputs.length ? Math.min(...inputs) : NaN;
+      const high = inputs.length ? Math.max(...inputs) : NaN;
+      const newest = run[0];
+      const model = modelName(newest.modelId, undefined);
+      const count = run.reduce((n, s) => n + (s.folded ?? 1), 0);
+      replaced.set(newest.key, {
+        ...newest,
+        kind: "drift",
+        score: 6,
+        folded: count,
+        events: run.flatMap((s) => s.events),
+        headline: `${model} price is volatile: ${count} changes in a week`,
+        detail: Number.isFinite(low) && Number.isFinite(high) ? `input between ${money(String(low))} and ${money(String(high))}` : "",
+        more: [],
+      });
+      for (const s of run.slice(1)) dropped.add(s.key);
+      i += run.length;
+    }
+  }
+  return stories.filter((s) => !dropped.has(s.key)).map((s) => replaced.get(s.key) ?? s);
 }
 
 /**
