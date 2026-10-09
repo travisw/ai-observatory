@@ -9,7 +9,7 @@ import { EmptyState, Skeleton } from "@spacefast/zero/kit";
 import { money } from "../../shared/model";
 import { isAlias, modelName, providerName } from "../../shared/providers";
 import { headlines, tally, type Story } from "../../shared/stories";
-import type { ArchiveEvent, HomePageData, ModelRow } from "../../shared/types";
+import type { ArchiveEvent, HomeModel, HomePageData } from "../../shared/types";
 import { Card, Chip, DeltaChip, ModelLink, ProviderLink, Section } from "../components/bits";
 import { StoryRow } from "../components/StoryRow";
 import { UptimeBar } from "../components/UptimeBar";
@@ -46,7 +46,7 @@ function Tile(props: { label: string; value: number; trend?: number[]; href: str
 }
 
 /** Net input-price move per model over a window, for the movers lists. */
-function movers(events: ArchiveEvent[], models: Map<string, ModelRow>, sinceIso: string) {
+function movers(events: ArchiveEvent[], models: Map<string, HomeModel>, sinceIso: string) {
   const byModel = new Map<string, ArchiveEvent[]>();
   for (const e of events) {
     if (e.kind !== "changed" || e.field !== "promptPrice" || e.at < sinceIso || isAlias(e.modelId)) continue;
@@ -74,7 +74,9 @@ export function HomePage() {
 
   // One subscription for the whole page: a burst of a dozen parallel requests gets rate-limited.
   const page = useQuery<HomePageData>("homePage");
-  const ready = !isLoading(page);
+  // Ready only once a real payload is here: the hook yields [] before the first result, and an
+  // errored query must keep showing the skeleton rather than a page of zeros.
+  const ready = Boolean(page) && !Array.isArray(page) && Array.isArray(page.models);
   const models = ready ? page.models : undefined;
   const events = ready ? page.events : undefined;
   const cheapest = ready ? page.cheapest : undefined;
@@ -155,26 +157,30 @@ export function HomePage() {
 
   return (
     <div class="flex flex-col gap-10">
-      <div class="flex flex-col gap-1">
-        <p class="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[13px] tabular-nums text-ink-muted">
-          <Link to="/models" class="text-ink hover:text-accent">{active.length} models</Link>
-          <span aria-hidden="true">·</span>
-          <Link to="/status" class="text-ink hover:text-accent">{providers.size} providers</Link>
-          <span aria-hidden="true">·</span>
-          <Link to="/status" class={`hover:text-accent ${notUp.length ? "text-warning" : "text-success"}`}>
-            {statuses.length === 0 ? "status pending" : notUp.length === 0 ? "all providers up" : `${plural(notUp.length, "provider")} not fully up`}
-          </Link>
-          <span aria-hidden="true">·</span>
-          <Link to="/changes" class="text-ink hover:text-accent">{plural(changesToday, "change")} today</Link>
-          {delta ? (
-            <>
-              <span aria-hidden="true">·</span>
-              <span>{delta > 0 ? "+" : ""}{delta} models this week</span>
-            </>
-          ) : null}
-        </p>
-        {facts.length ? <p class="text-xs text-ink-muted">{facts.join(" · ")}</p> : null}
-      </div>
+      {!ready ? (
+        <div class="flex flex-col gap-2"><Skeleton class="h-4 w-2/3 max-w-md" /><Skeleton class="h-3 w-1/2 max-w-sm" /></div>
+      ) : (
+        <div class="flex flex-col gap-1">
+          <p class="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[13px] tabular-nums text-ink-muted">
+            <Link to="/models" class="text-ink hover:text-accent">{active.length} models</Link>
+            <span aria-hidden="true">·</span>
+            <Link to="/status" class="text-ink hover:text-accent">{providers.size} providers</Link>
+            <span aria-hidden="true">·</span>
+            <Link to="/status" class={`hover:text-accent ${notUp.length ? "text-warning" : "text-success"}`}>
+              {statuses.length === 0 ? "status pending" : notUp.length === 0 ? "all providers up" : `${plural(notUp.length, "provider")} not fully up`}
+            </Link>
+            <span aria-hidden="true">·</span>
+            <Link to="/changes" class="text-ink hover:text-accent">{plural(changesToday, "change")} today</Link>
+            {delta ? (
+              <>
+                <span aria-hidden="true">·</span>
+                <span>{delta > 0 ? "+" : ""}{delta} models this week</span>
+              </>
+            ) : null}
+          </p>
+          {facts.length ? <p class="text-xs text-ink-muted">{facts.join(" · ")}</p> : null}
+        </div>
+      )}
 
       <Section
         title="What moved"
@@ -205,6 +211,9 @@ export function HomePage() {
       </Section>
 
       <Section title="This week in numbers" hint="last 7 days">
+        {!ready ? (
+          <div class="grid grid-cols-2 gap-3 md:grid-cols-5">{[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} class="h-24 w-full rounded-xl" />)}</div>
+        ) : (
         <div class="grid grid-cols-2 gap-3 md:grid-cols-5">
           <Tile label="Price cuts" value={cuts} trend={dayTrend((s) => s.kind === "repriced" && !s.source && (storyDelta(s) ?? 0) < 0)} href="/changes?kind=prices" />
           <Tile label="Price raises" value={raises} trend={dayTrend((s) => s.kind === "repriced" && !s.source && (storyDelta(s) ?? 0) > 0)} href="/changes?kind=prices" />
@@ -212,6 +221,7 @@ export function HomePage() {
           <Tile label="Removed" value={week.delisted} trend={dayTrend((s) => s.kind === "delisted")} href="/changes?kind=listings" />
           <Tile label="Context changes" value={week.resized} trend={dayTrend((s) => s.kind === "resized")} href="/changes?kind=context" />
         </div>
+        )}
         {week.drift ? <p class="text-xs text-ink-muted">{plural(week.drift, "small or back-and-forth move")} folded away this week.</p> : null}
       </Section>
 

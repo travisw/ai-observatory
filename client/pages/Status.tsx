@@ -87,7 +87,7 @@ export function StatusPage() {
         </Card>
       </Section>
 
-      <Section title="All providers" hint={`${providers.length} with models listed`}>
+      <Section title="All providers" hint={isLoading(models) ? undefined : `${providers.length} with models listed`}>
         <ul class="flex flex-wrap gap-2">
           {providers.map((p) => (
             <li key={p}>

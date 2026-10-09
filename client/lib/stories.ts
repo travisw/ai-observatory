@@ -38,12 +38,12 @@ export function keyOf(story: Story): string {
   return story.source && story.source !== "hosts" ? story.modelId : canonicalKey(story.provider, story.modelId);
 }
 
-export function nameIndex(models: ModelRow[] | undefined): Map<string, string> {
+export function nameIndex(models: Pick<ModelRow, "modelId" | "name">[] | undefined): Map<string, string> {
   return new Map((models ?? []).map((m) => [m.modelId, m.name]));
 }
 
 /** Canonical key → tracked model id, so a story from another source can link to the model page. */
-export function keyIndex(models: ModelRow[] | undefined): Map<string, string> {
+export function keyIndex(models: Pick<ModelRow, "modelId" | "provider">[] | undefined): Map<string, string> {
   return new Map((models ?? []).map((m) => [canonicalKey(m.provider, m.modelId), m.modelId]));
 }
 

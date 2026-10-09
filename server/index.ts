@@ -424,7 +424,19 @@ export default capsule({
         )
         .sort((a, b) => String(b.lowInputAt).localeCompare(String(a.lowInputAt)))
         .slice(0, 50);
-      return { models, events, hostEvents, lifecycleEvents, sourceEvents, statuses, statusEvents, incidents, records, cheapest, freshness, sweeps: sweeps.reverse() };
+      // Projected to what the page reads: the full rows run past the response size limit.
+      const slim = (row: any) => ({
+        id: row.id, modelId: row.modelId, provider: row.provider, name: row.name,
+        promptPrice: row.promptPrice, completionPrice: row.completionPrice, contextLength: row.contextLength,
+        changeCount: row.changeCount, lastChangedAt: row.lastChangedAt, lowInput: row.lowInput, lowInputAt: row.lowInputAt,
+        highInput: row.highInput, firstSeenAt: row.firstSeenAt, lastSeenAt: row.lastSeenAt, aliasTarget: row.aliasTarget,
+        expirationDate: row.expirationDate, aaIntelligence: row.aaIntelligence, active: row.active,
+      });
+      const slimEvent = (e: any) => ({ id: e.id, at: e.at, kind: e.kind, modelId: e.modelId, provider: e.provider, field: e.field, oldValue: e.oldValue, newValue: e.newValue });
+      return {
+        models: models.map(slim), events: events.map(slimEvent), hostEvents, lifecycleEvents, sourceEvents,
+        statuses, statusEvents, incidents, records, cheapest: cheapest.map(slim), freshness, sweeps: sweeps.reverse(),
+      };
     }),
 
     /** Paged archive, newest first. `cursor` is null for the first page. */

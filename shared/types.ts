@@ -238,8 +238,16 @@ export type CatalogueAtData = { at: string; models: ModelRow[] };
 export type HostsOverviewRow = { modelId: string; cheapestHost: string; cheapestIn: string; hosts: string };
 export type CompareData = { models: ModelRow[]; events: ArchiveEvent[]; lifecycle: LifecycleRow[] };
 
+/** The model columns the home page reads; the full row would push the response past its size limit. */
+export type HomeModel = Pick<
+  ModelRow,
+  | "id" | "modelId" | "provider" | "name" | "promptPrice" | "completionPrice" | "contextLength" | "changeCount"
+  | "lastChangedAt" | "lowInput" | "lowInputAt" | "highInput" | "firstSeenAt" | "lastSeenAt" | "aliasTarget"
+  | "expirationDate" | "aaIntelligence" | "active"
+>;
+
 export type HomePageData = {
-  models: ModelRow[];
+  models: HomeModel[];
   /** Last 90 days, newest first, at most 1000. */
   events: ArchiveEvent[];
   hostEvents: HostEvent[];
@@ -249,7 +257,7 @@ export type HomePageData = {
   statusEvents: StatusEvent[];
   incidents: IncidentRow[];
   records: RecordRow[];
-  cheapest: ModelRow[];
+  cheapest: HomeModel[];
   freshness: Record<string, string>;
   sweeps: { at: string; listed: number }[];
 };
