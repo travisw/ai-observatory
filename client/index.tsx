@@ -55,7 +55,7 @@ function FreshnessStamp({ models }: { models: string | undefined }) {
   const stale = models ? Date.now() - Date.parse(models) > 3 * 3600 * 1000 : false;
   const time = models ? models.slice(11, 16) : "--:--";
   return (
-    <span class="inline-flex items-center gap-2" title={models ? `Last check ${models.replace("T", " ").slice(0, 16)} UTC${stale ? ", overdue" : ""}` : "Connecting"}>
+    <span class="relative inline-flex items-center gap-2" title={models ? `Last check ${models.replace("T", " ").slice(0, 16)} UTC${stale ? ", overdue" : ""}` : "Connecting"}>
       <span class="text-[11px] font-semibold uppercase tracking-[0.25em] text-ink-muted">Last sweep</span>
       <FlapText text={time} width={5} size="sm" tone={stale ? "warning" : "ink"} />
       <span class="sr-only">{models ? `${ago(models)}${stale ? ", overdue" : ""}` : "connecting"}</span>

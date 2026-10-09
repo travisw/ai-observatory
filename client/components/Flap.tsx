@@ -276,7 +276,10 @@ function FlapTextInner(props: FlapTextProps) {
   const chars = fit(props.text, props.width, props.align);
   const stagger = props.stagger ?? 8;
   return (
-    <span class={`inline-flex items-center ${toneClass(props.tone ?? "ink")} ${props.class ?? ""}`} style={{ gap: `${SIZE[size].gap}px` }}>
+    // `relative`, so the screen-reader text (absolutely positioned, visually hidden) is placed
+    // against this run and not the viewport: an absolute span at the end of a long row would
+    // otherwise stretch the whole document sideways.
+    <span class={`relative inline-flex items-center ${toneClass(props.tone ?? "ink")} ${props.class ?? ""}`} style={{ gap: `${SIZE[size].gap}px` }}>
       <span aria-hidden="true" class="inline-flex items-center" style={{ gap: `${SIZE[size].gap}px` }}>
         {chars.map((ch, i) => (
           <FlapCell key={i} target={ch} size={size} delay={(props.delay ?? 0) + i * stagger} />
