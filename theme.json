@@ -2,20 +2,21 @@
   "settings": {
     "color": {
       "palette": [
-        { "slug": "canvas",    "color": "#0b0e14", "name": "Canvas" },
-        { "slug": "surface",   "color": "#121722", "name": "Surface" },
-        { "slug": "ink",       "color": "#e7ebf3", "name": "Ink" },
-        { "slug": "ink-muted", "color": "#8a94a8", "name": "Ink muted" },
-        { "slug": "line",      "color": "#222a3a", "name": "Line" },
-        { "slug": "accent",    "color": "#6ea8ff", "name": "Accent" },
-        { "slug": "success",   "color": "#3ddc84", "name": "Cheaper / up" },
-        { "slug": "warning",   "color": "#ffb454", "name": "Pricier / degraded" },
-        { "slug": "danger",    "color": "#ff5c5c", "name": "Removed / down" }
+        { "slug": "canvas",    "color": "#090909", "name": "Hall" },
+        { "slug": "surface",   "color": "#141414", "name": "Board" },
+        { "slug": "flap",      "color": "#1f1f1f", "name": "Flap face" },
+        { "slug": "ink",       "color": "#f3e9cf", "name": "Letters" },
+        { "slug": "ink-muted", "color": "#8f8a7a", "name": "Dim letters" },
+        { "slug": "line",      "color": "#2a2a2a", "name": "Rail" },
+        { "slug": "accent",    "color": "#ffb000", "name": "Amber" },
+        { "slug": "success",   "color": "#7df0a1", "name": "On time" },
+        { "slug": "warning",   "color": "#ffb000", "name": "Delayed" },
+        { "slug": "danger",    "color": "#ff5a4a", "name": "Cancelled" }
       ]
     },
     "typography": {
       "fontFamilies": [
-        { "slug": "body", "fontFamily": "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Inter, sans-serif", "name": "Sans" },
+        { "slug": "body", "fontFamily": "'Barlow Condensed', 'Arial Narrow', 'Helvetica Neue', Impact, sans-serif", "name": "Board" },
         { "slug": "mono", "fontFamily": "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", "name": "Mono" }
       ]
     }

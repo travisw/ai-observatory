@@ -401,6 +401,9 @@ export default capsule({
       const statusEvents = await ctx.db.statusEvents.withIndex("by_at", (range) => range.gte("at", since90)).order("desc").take(1000);
       const incidents = await ctx.db.incidents.withIndex("by_started", (range) => range.gte("startedAt", since90)).order("desc").take(1000);
       const records = await ctx.db.records.withIndex("by_key").order("asc").take(50);
+      const retiringSince = new Date(Date.now() - 60 * DAY).toISOString().slice(0, 10);
+      const retiring = (await ctx.db.lifecycle.withIndex("by_retires", (range) => range.gte("retiresAt", retiringSince)).order("asc").take(300))
+        .filter((row) => row.active === true && row.state !== "active");
       const polls = await ctx.db.polls.withIndex("by_at").order("desc").take(400);
       const freshness: Record<string, string> = {};
       const sweeps: { at: string; listed: number }[] = [];
@@ -435,7 +438,7 @@ export default capsule({
       const slimEvent = (e: any) => ({ id: e.id, at: e.at, kind: e.kind, modelId: e.modelId, provider: e.provider, field: e.field, oldValue: e.oldValue, newValue: e.newValue });
       return {
         models: models.map(slim), events: events.map(slimEvent), hostEvents, lifecycleEvents, sourceEvents,
-        statuses, statusEvents, incidents, records, cheapest: cheapest.map(slim), freshness, sweeps: sweeps.reverse(),
+        statuses, statusEvents, incidents, records, retiring, cheapest: cheapest.map(slim), freshness, sweeps: sweeps.reverse(),
       };
     }),
 

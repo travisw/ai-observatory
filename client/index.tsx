@@ -6,12 +6,14 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { Link, Route, Router, Routes, useLocation, useNavigate, useQuery } from "@spacefast/zero/client";
 import { EmptyState, Icon, Kbd } from "@spacefast/zero/kit";
 
+import { BOARD_FONT, FlapStyles, FlapText, Sign } from "./components/Flap";
 import { Palette, type PaletteMode } from "./components/Palette";
 import { ShortcutSheet } from "./components/ShortcutSheet";
 import { clearFreshness, useProvidedFreshness } from "./lib/freshness";
 import { PALETTE_EVENT } from "./lib/palette";
+import { useSound } from "./lib/sound";
 import { useWatchlist } from "./lib/watch";
-import { ago, prefersReducedMotion } from "./lib/util";
+import { ago } from "./lib/util";
 import { AboutPage } from "./pages/About";
 import { ApiPage } from "./pages/Api";
 import { ChangesPage } from "./pages/Changes";
@@ -46,25 +48,43 @@ const MORE = [
   { to: "/about", label: "About" },
 ];
 
-/** "checked 12m ago", flashing once when a new sweep lands. */
+/** "LAST SWEEP 17:02" in flaps; the cells flip on their own when a new sweep lands. */
 function FreshnessStamp({ models }: { models: string | undefined }) {
-  const [pulse, setPulse] = useState(false);
-  const previous = useRef<string | undefined>(undefined);
-  useEffect(() => {
-    if (previous.current && models && models !== previous.current && !prefersReducedMotion()) {
-      setPulse(true);
-      const t = setTimeout(() => setPulse(false), 1200);
-      return () => clearTimeout(t);
-    }
-    previous.current = models;
-  }, [models]);
   const stale = models ? Date.now() - Date.parse(models) > 3 * 3600 * 1000 : false;
+  const time = models ? models.slice(11, 16) : "--:--";
   return (
-    <span class={`inline-flex items-center gap-1.5 font-mono text-xs tabular-nums ${stale ? "text-warning" : "text-ink-muted"} ${pulse ? "animate-pulse text-accent" : ""}`} title={models ? `Last check ${models.replace("T", " ").slice(0, 16)} UTC` : undefined}>
-      <span class={`inline-block size-1.5 rounded-full ${stale ? "bg-warning" : "bg-success"}`} aria-hidden="true" />
-      {models ? `checked ${ago(models)}` : "connecting…"}
-      {stale ? " · overdue" : ""}
+    <span class="inline-flex items-center gap-2" title={models ? `Last check ${models.replace("T", " ").slice(0, 16)} UTC${stale ? ", overdue" : ""}` : "Connecting"}>
+      <span class="text-[11px] font-semibold uppercase tracking-[0.25em] text-ink-muted">Last sweep</span>
+      <FlapText text={time} width={5} size="sm" tone={stale ? "warning" : "ink"} />
+      <span class="sr-only">{models ? `${ago(models)}${stale ? ", overdue" : ""}` : "connecting"}</span>
     </span>
+  );
+}
+
+/** The hall clock, UTC. Only the cells that change flip, so the seconds tick and the rest sit still. */
+function Clock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const hhmm = now.toISOString().slice(11, 16);
+  const ss = now.toISOString().slice(17, 19);
+  return (
+    <span class="inline-flex items-center gap-2" aria-label={`${hhmm}:${ss} UTC`}>
+      <FlapText text={hhmm} width={5} size="sm" />
+      <span class="hidden sm:inline-flex"><FlapText text={ss} width={2} size="sm" tone="muted" stagger={0} /></span>
+      <span class="text-[11px] font-semibold uppercase tracking-[0.25em] text-ink-muted">UTC</span>
+    </span>
+  );
+}
+
+function SoundSign() {
+  const [on, setOn] = useSound();
+  return (
+    <Sign onClick={() => setOn(!on)} active={on} title={on ? "Switch the board's click off" : "Switch the board's click on"} ariaLabel={`Sound ${on ? "on" : "off"}`}>
+      Sound {on ? "on" : "off"}
+    </Sign>
   );
 }
 
@@ -90,37 +110,33 @@ function Nav(props: { pathname: string; onSearch: () => void; watching: number }
   }, [more]);
   const inMore = MORE.some((m) => props.pathname === m.to);
   return (
-    <nav class="flex flex-wrap items-center gap-1 text-sm" aria-label="Main">
-      {PRIMARY.map((item) => {
-        const active = item.match(props.pathname);
-        return (
-          <Link key={item.to} to={item.to} class={`rounded-md px-2.5 py-1.5 ${active ? "bg-ink/10 text-ink" : "text-ink-muted hover:text-ink"}`} aria-current={active ? "page" : undefined}>
-            {item.label}
-          </Link>
-        );
-      })}
+    <nav class="flex flex-wrap items-center gap-1.5" aria-label="Main">
+      {PRIMARY.map((item) => (
+        <Sign key={item.to} to={item.to} active={item.match(props.pathname)}>{item.label}</Sign>
+      ))}
       <div class="relative" ref={moreRef}>
-        <button type="button" class={`inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 ${inMore ? "bg-ink/10 text-ink" : "text-ink-muted hover:text-ink"}`} onClick={() => setMore((v) => !v)} aria-expanded={more} aria-haspopup="menu">
+        <Sign onClick={() => setMore((v) => !v)} active={inMore}>
           More <Icon name="chevron-down" size="sm" />
-        </button>
+        </Sign>
         {more ? (
-          <div class="absolute right-0 z-40 mt-1 flex min-w-44 flex-col rounded-lg border border-line bg-surface py-1 shadow-xl" role="menu">
+          <div class="absolute right-0 z-40 mt-1 flex min-w-44 flex-col rounded-sm border border-line bg-surface py-1 shadow-xl" role="menu">
             {MORE.map((m) => (
-              <Link key={m.to} to={m.to} class="px-3 py-1.5 text-sm text-ink hover:bg-ink/5" role="menuitem" onClick={() => setMore(false)}>{m.label}</Link>
+              <Link key={m.to} to={m.to} class="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-ink hover:bg-flap" role="menuitem" onClick={() => setMore(false)}>{m.label}</Link>
             ))}
           </div>
         ) : null}
       </div>
-      <button type="button" class="ml-1 inline-flex items-center gap-2 rounded-md border border-line px-2.5 py-1.5 text-ink-muted hover:border-ink-muted hover:text-ink" onClick={props.onSearch} aria-label="Search">
+      <Sign onClick={props.onSearch} ariaLabel="Search">
         <Icon name="search" size="sm" />
         <span class="hidden sm:inline">Search</span>
-        <span class="hidden sm:inline-flex gap-0.5"><Kbd>⌘</Kbd><Kbd>K</Kbd></span>
-      </button>
+        <span class="hidden sm:inline-flex gap-0.5 normal-case tracking-normal"><Kbd>⌘</Kbd><Kbd>K</Kbd></span>
+      </Sign>
       {props.watching > 0 ? (
-        <Link to="/changes?watch=1" class="inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-ink-muted hover:text-ink" title="Changes to models you watch">
+        <Sign to="/changes?watch=1" title="Changes to models you watch">
           <Icon name="star" size="sm" /> {props.watching}
-        </Link>
+        </Sign>
       ) : null}
+      <SoundSign />
     </nav>
   );
 }
@@ -182,21 +198,23 @@ function Shell() {
   useEffect(() => { window.scrollTo(0, 0); if (location.pathname !== "/") clearFreshness(); }, [location.pathname]);
 
   return (
-    <div class="min-h-dvh bg-canvas text-ink">
+    <div class="min-h-dvh bg-canvas text-ink" style={{ fontFamily: BOARD_FONT }}>
+      <FlapStyles />
       <a href="#main" class="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-accent focus:px-3 focus:py-1 focus:text-canvas">Skip to content</a>
-      <header class="border-b border-line">
-        <div class="mx-auto flex w-full max-w-[1120px] flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 py-3 sm:px-6">
-          <div class="flex items-baseline gap-3">
-            <Link to="/" class="text-base font-semibold tracking-tight text-ink hover:text-accent">
-              <span class="mr-1.5 inline-block size-2.5 rounded-full bg-accent align-middle" aria-hidden="true" />
-              AI Observatory
+      <header class="border-b-2 border-accent/60 bg-canvas shadow-[0_8px_30px_rgba(0,0,0,0.6)]">
+        <div class="mx-auto flex w-full max-w-[1180px] flex-wrap items-center justify-between gap-x-6 gap-y-3 px-4 py-3 sm:px-6">
+          <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
+            <Link to="/" class="group inline-flex flex-col leading-none" aria-label="AI Observatory, home">
+              <span class="text-xl font-bold uppercase tracking-[0.35em] text-ink [text-shadow:0_0_18px_rgba(243,233,207,0.35)] group-hover:text-accent">AI Observatory</span>
+              <span class="mt-1 h-0.5 w-full bg-accent shadow-[0_0_10px_rgba(255,176,0,0.8)]" aria-hidden="true" />
             </Link>
             {location.pathname === "/" ? <FreshnessProvided /> : <FreshnessLive />}
           </div>
+          <Clock />
           <Nav pathname={location.pathname} onSearch={() => setPalette({ kind: "navigate" })} watching={watchlist.length} />
         </div>
       </header>
-      <main id="main" class="mx-auto flex w-full max-w-[1120px] flex-col gap-10 px-4 py-6 sm:px-6 sm:py-8">
+      <main id="main" class="mx-auto flex w-full max-w-[1180px] flex-col gap-10 px-4 py-6 sm:px-6 sm:py-8">
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/changes" element={<ChangesPage />} />
@@ -219,15 +237,15 @@ function Shell() {
           <Route path="*rest" element={<EmptyState title="Not found" description="No page at this address." icon="search" />} />
         </Routes>
       </main>
-      <footer class="border-t border-line">
-        <div class="mx-auto flex w-full max-w-[1120px] flex-wrap items-center justify-between gap-3 px-4 py-4 text-xs text-ink-muted sm:px-6">
+      <footer class="mx-auto w-full max-w-[1180px] px-4 pb-8 sm:px-6">
+        <div class="flex flex-wrap items-center justify-between gap-3 rounded-sm border border-accent/40 bg-accent/10 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.25em] text-accent shadow-[inset_0_1px_0_rgba(255,176,0,0.25)]">
           <span>AI Observatory · the changelog AI providers don't publish</span>
-          <span class="flex flex-wrap gap-3">
+          <span class="flex flex-wrap gap-4">
             <Link to="/about" class="hover:text-ink">About</Link>
             <Link to="/api" class="hover:text-ink">API & feeds</Link>
             <a href="/feed.xml" class="hover:text-ink">RSS</a>
             <a href="https://github.com/travisw/ai-observatory" class="hover:text-ink" target="_blank" rel="noopener">Source</a>
-            <button type="button" class="hover:text-ink" onClick={() => setSheet(true)}>Shortcuts <Kbd>?</Kbd></button>
+            <button type="button" class="uppercase tracking-[0.25em] hover:text-ink" onClick={() => setSheet(true)}>Shortcuts <Kbd>?</Kbd></button>
           </span>
         </div>
       </footer>

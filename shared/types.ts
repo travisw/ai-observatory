@@ -257,6 +257,8 @@ export type HomePageData = {
   statusEvents: StatusEvent[];
   incidents: IncidentRow[];
   records: RecordRow[];
+  /** Active retirement notices with a date from 60 days ago onward, soonest first. */
+  retiring: LifecycleRow[];
   cheapest: HomeModel[];
   freshness: Record<string, string>;
   sweeps: { at: string; listed: number }[];
