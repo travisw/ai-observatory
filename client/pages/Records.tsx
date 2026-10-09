@@ -56,7 +56,7 @@ export function RecordsPage() {
                   <span class="text-[11px] font-bold uppercase tracking-[0.35em] text-accent [text-shadow:0_0_14px_rgba(255,176,0,0.45)]">{shape.title}</span>
                   <FlapText text={shape.value(r)} width={shape.width} size="lg" tone={shape.tone} delay={i * 60} />
                   <FlapText text={holder} width={Math.min(22, Math.max(8, holder.length))} size="sm" delay={i * 60 + 120} />
-                  <span class="text-xs text-ink-muted">{providerName(r.provider)} · {r.detail}{r.at ? ` · ${boardDate(r.at)} ${r.at.slice(0, 4)}` : ""}</span>
+                  <span class="text-xs text-ink-muted">{providerName(r.provider)} · {r.detail}{r.at && r.key !== "longest-unchanged" ? ` · ${boardDate(r.at)} ${r.at.slice(0, 4)}` : ""}</span>
                 </Link>
               </li>
             );

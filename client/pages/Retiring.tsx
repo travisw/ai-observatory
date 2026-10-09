@@ -6,7 +6,7 @@ import { useMemo } from "preact/hooks";
 import { Link, useQuery } from "@spacefast/zero/client";
 
 import { isAlias, providerName } from "../../shared/providers";
-import { SOURCE_LABEL, SOURCE_URL, canonicalKey } from "../../shared/sources";
+import { SOURCE_URL, canonicalKey } from "../../shared/sources";
 import type { LifecycleRow, ModelRow, RetiringData } from "../../shared/types";
 import { Board, ColumnHeads, FlapRow, FlapText, Sign } from "../components/Flap";
 import { BoardEmpty, LogLine, LogSection, Marquee, PageSkeleton } from "../components/Log";
@@ -104,7 +104,7 @@ export function RetiringPage() {
       ) : (
         [...byMonth.entries()].map(([month, list], b) => (
           <Board key={month} label={monthLabel(month)} hint={plural(list.length, "departure")}>
-            <ColumnHeads columns={[{ label: "Retires", width: 6, sticky: true }, { label: "Model", width: 22, sticky: true }, { label: "Provider", width: 9 }, { label: "Gate", width: 16 }, { label: "Status", width: 10 }, { label: "Notice", width: 7 }]} />
+            <ColumnHeads columns={[{ label: "Retires", width: 6, sticky: true }, { label: "Model", width: 22, sticky: true }, { label: "Provider", width: 9 }, { label: "Gate", width: 23 }, { label: "Status", width: 10 }]} />
             {list.map((r, i) => {
               const status = departureStatus(r.retiresAt);
               return (
@@ -118,9 +118,8 @@ export function RetiringPage() {
                       { text: boardDate(r.retiresAt), width: 6, sticky: true, tone: "muted" },
                       { text: r.model, width: 22, sticky: true, tone: status.word === "DEPARTED" ? "danger" : "ink" },
                       { text: providerName(r.provider), width: 9, tone: "muted" },
-                      { text: r.replacement || "-", width: 16, tone: r.replacement ? "ink" : "muted" },
+                      { text: r.replacement || "-", width: 23, tone: r.replacement ? "ink" : "muted" },
                       { text: status.word, width: 10, tone: status.tone },
-                      { text: (SOURCE_LABEL[r.source] ?? r.source).split("'")[0].slice(0, 7), width: 7, tone: "muted" },
                     ]}
                   />
                   <p class="border-b border-dotted border-line px-3 pb-1.5 text-xs text-ink-muted">

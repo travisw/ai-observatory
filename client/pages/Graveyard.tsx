@@ -61,8 +61,8 @@ export function GraveyardPage() {
         <div class="flex flex-col gap-1.5">
           <span class="text-[11px] font-semibold uppercase tracking-[0.3em] text-ink-muted">Next funeral</span>
           {next ? (
-            <Link to="/retiring" class="inline-flex items-center gap-3" aria-label={`${next.modelId} in ${daysUntil(next.retiresAt)} days`}>
-              <FlapText text={next.modelId} width={Math.min(22, Math.max(8, next.modelId.length))} size="lg" delay={240} />
+            <Link to="/retiring" class="inline-flex flex-wrap items-center gap-3" aria-label={`${shortName(next.modelId)} in ${daysUntil(next.retiresAt)} days`}>
+              <FlapText text={shortName(next.modelId)} width={Math.min(22, Math.max(8, shortName(next.modelId).length))} size="lg" delay={240} />
               <FlapText text={`${daysUntil(next.retiresAt)} DAYS`} width={8} size="lg" tone={daysUntil(next.retiresAt) <= 30 ? "warning" : "ink"} delay={360} />
             </Link>
           ) : (

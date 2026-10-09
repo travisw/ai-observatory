@@ -3,12 +3,12 @@
  * its status page says it is up.
  */
 import { useMemo } from "preact/hooks";
-import { useQuery } from "@spacefast/zero/client";
+import { Link, useQuery } from "@spacefast/zero/client";
 
 import { providerName } from "../../shared/providers";
 import { canonicalProvider } from "../../shared/sources";
 import type { ArchiveEvent, ModelRow, StatusPageData } from "../../shared/types";
-import { Board, ColumnHeads, FlapRow, Sign } from "../components/Flap";
+import { Board, ColumnHeads, FlapRow, Sign, columnWidth, toneClass } from "../components/Flap";
 import { BoardEmpty, Marquee, PageSkeleton } from "../components/Log";
 import { remarkWord, statusWord } from "../lib/board";
 import { isLoading, plural, providerHref, usePageTitle, useSince } from "../lib/util";
@@ -53,7 +53,7 @@ export function ProvidersPage() {
         ) : (
           <>
             <ColumnHeads columns={[{ label: "Provider", width: 18, sticky: true }, { label: "Models", width: 6, align: "right" }, { label: "Changes 7d", width: 10, align: "right" }, { label: "Status", width: 10 }, { label: "Remarks", width: 20 }]} />
-            {rows.map((r, i) => {
+            {rows.slice(0, 15).map((r, i) => {
               const spec = r.status ? statusWord(r.status.indicator) : { word: "NO PAGE", tone: "muted" as const };
               return (
                 <FlapRow
@@ -71,6 +71,25 @@ export function ProvidersPage() {
                 />
               );
             })}
+            {rows.length > 15 ? (
+              <>
+                <p class="border-y border-line bg-flap px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.3em] text-ink-muted">And {rows.length - 15} more</p>
+                <ul>
+                  {rows.slice(15).map((r) => {
+                    const spec = r.status ? statusWord(r.status.indicator) : { word: "NO PAGE", tone: "muted" as const };
+                    return (
+                      <li key={r.slug} class="flex items-center gap-4 border-b border-dotted border-line px-3 py-1.5 text-sm last:border-0" data-feed-row>
+                        <span class="shrink-0" style={{ width: `${columnWidth(18)}px` }}><Link to={providerHref(r.slug)} class="text-[15px] text-ink hover:text-accent">{providerName(r.slug)}</Link></span>
+                        <span class="shrink-0 text-right font-mono text-xs tabular-nums text-ink" style={{ width: `${columnWidth(6)}px` }}>{r.listed}</span>
+                        <span class={`shrink-0 text-right font-mono text-xs tabular-nums ${r.changes ? "text-accent" : "text-ink-muted"}`} style={{ width: `${columnWidth(10)}px` }}>{r.changes || "-"}</span>
+                        <span class={`shrink-0 text-[11px] font-semibold uppercase tracking-[0.2em] ${toneClass(spec.tone)}`} style={{ width: `${columnWidth(10)}px` }}>{spec.word}</span>
+                        <span class="shrink-0 truncate text-[11px] uppercase tracking-[0.15em] text-ink-muted" style={{ width: `${columnWidth(20)}px` }}>{r.status ? remarkWord(r.status.indicator, r.status.description) : ""}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
+            ) : null}
           </>
         )}
       </Board>

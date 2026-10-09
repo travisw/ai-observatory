@@ -38,29 +38,35 @@ export function StatusPage() {
       </Marquee>
 
       <Board label="Status" hint="last 90 days">
-        <ColumnHeads columns={[{ label: "Provider", width: 11, sticky: true }, { label: "Status", width: 9 }, { label: "Remarks", width: 16 }, { label: "Last 90 days", width: 48 }, { label: "Days", width: 6, align: "right" }]} />
+        <ColumnHeads columns={[{ label: "Provider", width: 11, sticky: true }, { label: "Status", width: 9 }, { label: "Remarks", width: 28 }, { label: "Incident days", width: 12, align: "right" }]} />
         {data.statuses.map((s, i) => {
           const days = uptimeDays(s, data.statusEvents.filter((e) => e.provider === s.provider), data.incidents.filter((inc) => inc.provider === s.provider), 90);
           const sum = uptimeSummary(days);
           const spec = statusWord(s.indicator);
           const remarks = remarkWord(s.indicator, s.description);
           return (
-            <FlapRow
-              key={s.id}
-              href={providerHref(s.provider)}
-              label={`${providerName(s.provider)}: ${spec.word.toLowerCase()}. ${remarks}. ${sum.recorded === 0 ? "No record yet" : `${sum.incidentDays} incident days of ${sum.recorded} recorded`}. Checked ${ago(s.checkedAt)}.`}
-              delay={i * 40}
-              columns={[
-                { text: providerName(s.provider), width: 11, sticky: true },
-                { text: spec.word, width: 9, tone: spec.tone },
-                { text: remarks, width: 16, tone: "muted" },
-                { text: "", width: 48, render: <UptimeStrip days={days} label={`${providerName(s.provider)} over the last 90 days`} /> },
-                { text: sum.recorded ? `${sum.incidentDays}/${sum.recorded}` : "-", width: 6, align: "right", tone: sum.incidentDays ? "warning" : "muted" },
-              ]}
-            />
+            <div key={s.id} class="border-b border-line/70 last:border-0">
+              <FlapRow
+                href={providerHref(s.provider)}
+                label={`${providerName(s.provider)}: ${spec.word.toLowerCase()}. ${remarks}. ${sum.recorded === 0 ? "No record yet" : `${sum.incidentDays} incident days of ${sum.recorded} recorded`}. Checked ${ago(s.checkedAt)}.`}
+                delay={i * 40}
+                class="border-0"
+                columns={[
+                  { text: providerName(s.provider), width: 11, sticky: true },
+                  { text: spec.word, width: 9, tone: spec.tone },
+                  { text: remarks, width: 28, tone: "muted" },
+                  { text: sum.recorded ? `${sum.incidentDays} OF ${sum.recorded}` : "-", width: 12, align: "right", tone: sum.incidentDays ? "warning" : "muted" },
+                ]}
+              />
+              <div class="flex items-center gap-3 overflow-x-auto px-3 pb-2">
+                <span class="shrink-0 text-[10px] uppercase tracking-[0.2em] text-ink-muted">90 days</span>
+                <UptimeStrip days={days} label={`${providerName(s.provider)} over the last 90 days`} />
+                <span class="shrink-0 text-[10px] uppercase tracking-[0.2em] text-ink-muted">today</span>
+              </div>
+            </div>
           );
         })}
-        <p class="px-3 py-2 text-xs text-ink-muted">Amber is a degraded day, red a day with an outage; "days" is incident days out of recorded days.</p>
+        <p class="px-3 py-2 text-xs text-ink-muted">Amber is a degraded day, red a day with an outage; "incident days" is out of days with a record.</p>
       </Board>
 
       <LogSection title="Incidents" hint={incidents.length ? `${plural(incidents.length, "incident")} in 90 days` : "last 90 days"}>
