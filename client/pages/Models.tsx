@@ -26,6 +26,15 @@ const SORTS: { key: SortKey; label: string; align?: "right" }[] = [
   { key: "listed", label: "listed", align: "right" },
 ];
 
+function paidFirst(a: string, b: string): number {
+  const x = Number(a);
+  const y = Number(b);
+  if (x > 0 && y > 0) return x - y;
+  if (x > 0) return -1;
+  if (y > 0) return 1;
+  return 0;
+}
+
 export function ModelsPage() {
   usePageTitle("Models");
   const params = useSearchParams();
@@ -64,8 +73,9 @@ export function ModelsPage() {
         switch (sort) {
           case "model": return a.modelId.localeCompare(b.modelId);
           case "context": return Number(b.contextLength) - Number(a.contextLength);
-          case "input": return Number(a.promptPrice) - Number(b.promptPrice);
-          case "output": return Number(a.completionPrice) - Number(b.completionPrice);
+          // Free models sort last on price, so the cheapest view is about paid prices.
+          case "input": return paidFirst(a.promptPrice, b.promptPrice);
+          case "output": return paidFirst(a.completionPrice, b.completionPrice);
           case "score": return (Number(b.aaIntelligence) || -1) - (Number(a.aaIntelligence) || -1);
           case "changes": return Number(b.changeCount) - Number(a.changeCount);
           default: return b.firstSeenAt.localeCompare(a.firstSeenAt);

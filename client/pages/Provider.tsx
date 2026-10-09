@@ -106,7 +106,7 @@ export function ProviderPage() {
               <tbody>
                 {sorted.map((m) => (
                   <tr key={m.id} class="border-b border-line last:border-0">
-                    <td class="px-4 py-1.5"><ModelLink modelId={m.modelId} name={m.name} />{Number(m.changeCount) > 0 ? <span class="ml-2 text-[11px] text-ink-muted">{m.changeCount} changes</span> : null}</td>
+                    <td class="px-4 py-1.5"><ModelLink modelId={m.modelId} name={m.name} />{Number(m.changeCount) > 0 ? <span class="ml-2 text-[11px] text-ink-muted">{plural(Number(m.changeCount), "change")}</span> : null}</td>
                     <td class="px-2 py-1.5"><Sparkline values={inputSpark(m, ownRecent)} width={72} height={18} /></td>
                     <td class="px-2 py-1.5 text-right font-mono tabular-nums text-ink-muted">{formatContext(m.contextLength)}</td>
                     <td class="px-2 py-1.5 text-right font-mono tabular-nums text-ink">{money(m.promptPrice)}</td>

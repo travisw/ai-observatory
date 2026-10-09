@@ -71,6 +71,14 @@ export function longDate(iso: string): string {
   return date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 }
 
+/** "23 Oct": for rows already grouped under a month heading. */
+export function dayMonth(iso: string): string {
+  if (!iso) return "";
+  const date = new Date(iso.length === 10 ? `${iso}T00:00:00Z` : iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleDateString(undefined, { day: "numeric", month: "short", timeZone: "UTC" });
+}
+
 export function monthLabel(iso: string): string {
   const date = new Date(`${iso.slice(0, 7)}-01T00:00:00Z`);
   return date.toLocaleDateString(undefined, { month: "long", year: "numeric", timeZone: "UTC" });

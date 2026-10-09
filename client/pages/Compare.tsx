@@ -98,7 +98,15 @@ export function ComparePage() {
                           return (
                             <td key={m.modelId} class={`px-3 py-2 font-mono tabular-nums ${isBest ? "bg-success/10 text-success" : "text-ink"}`}>
                               {spec.show(m)}
-                              {gap !== null && Math.abs(gap) >= 1 ? <span class="ml-2"><DeltaChip value={gap} good={spec.lowerIsBetter ? gap < 0 : gap > 0} size="sm" title="versus the best in this row" /></span> : null}
+                              {gap !== null && Math.abs(gap) >= 1 ? (
+                                <span class="ml-2">
+                                  {gap > 300 ? (
+                                    <span class="inline-flex items-center rounded-md bg-warning/15 px-1.5 py-0 font-mono text-[11px] font-medium tabular-nums text-warning" title="versus the best in this row">×{Math.round(gap / 100 + 1)} {spec.lowerIsBetter ? "more" : "less"}</span>
+                                  ) : (
+                                    <DeltaChip value={gap} good={spec.lowerIsBetter ? gap < 0 : gap > 0} size="sm" title="versus the best in this row" />
+                                  )}
+                                </span>
+                              ) : null}
                             </td>
                           );
                         })}

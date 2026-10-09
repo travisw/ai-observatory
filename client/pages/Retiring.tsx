@@ -11,7 +11,7 @@ import { SOURCE_LABEL, SOURCE_URL, canonicalKey } from "../../shared/sources";
 import type { LifecycleRow, ModelRow, RetiringData } from "../../shared/types";
 import { Card, ExternalLink, ModelLink, ProviderLink, Section } from "../components/bits";
 import { keyIndex } from "../lib/stories";
-import { countdown, daysUntil, isLoading, longDate, monthLabel, plural, usePageTitle } from "../lib/util";
+import { countdown, dayMonth, daysUntil, isLoading, longDate, monthLabel, plural, usePageTitle } from "../lib/util";
 
 function urgency(iso: string): "danger" | "warning" | "neutral" {
   const days = daysUntil(iso);
@@ -70,7 +70,7 @@ export function RetiringPage() {
                   return (
                     <li key={r.id} class="grid gap-x-4 gap-y-1 border-b border-line px-4 py-3 last:border-0 sm:grid-cols-[7rem_1fr_auto]">
                       <div class="flex flex-col">
-                        <span class="font-mono text-sm tabular-nums text-ink">{longDate(r.retiresAt).replace(/ \d{4}$/, "")}</span>
+                        <span class="font-mono text-sm whitespace-nowrap tabular-nums text-ink">{dayMonth(r.retiresAt)}</span>
                         <Badge tone={urgency(r.retiresAt)}>{countdown(r.retiresAt)}</Badge>
                       </div>
                       <div class="flex min-w-0 flex-col gap-0.5">

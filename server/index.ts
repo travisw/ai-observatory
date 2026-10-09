@@ -1519,6 +1519,12 @@ const INDEX_METHOD =
   "Per day, over active models that are not rolling aliases and not free: blended price = (3 × input + output) / 4 per million tokens. " +
   "Frontier = the 15 highest Artificial Analysis intelligence scores, mid = the next 30, budget = the rest with a score. Each tier reports its median.";
 
+/**
+ * Prices below a tenth of a cent per million are routing placeholders, not list prices.
+ * They are archived like any value but kept off the records board.
+ */
+const MIN_RECORD_PRICE = 1e-9;
+
 /** Fields written for the first time by v2. A blank before-value on an old row is not a change. */
 const NEW_FIELDS = new Set<string>(["aliasTarget", "expirationDate", "tiers", "knowledgeCutoff", "inputModalities", "reasoning"]);
 
@@ -1790,7 +1796,7 @@ async function noteRecords(ctx: Ctx, model: TrackedModel, field: string, before:
     if (y > x) await bumpRecord(ctx, "largest-context-jump", { ...who, value: String(y), detail: `${formatContext(before)} → ${formatContext(after)}` }, (a, b) => a > b);
     return;
   }
-  if (x <= 0 || y <= 0) return;
+  if (x < MIN_RECORD_PRICE || y < MIN_RECORD_PRICE) return;
   const move = ((y - x) / x) * 100;
   const side = field === "promptPrice" ? "input" : "output";
   const detail = `${money(before)} → ${money(after)} per million`;
@@ -1823,7 +1829,9 @@ async function rebuildRecordsPage(ctx: Ctx, cursor: string | null) {
     if (!row || isAlias(String(e.modelId))) continue;
     const model = { modelId: String(e.modelId), provider: String(e.provider) } as TrackedModel;
     if (e.kind === "added") {
-      if (Number(e.at < String(row.firstSeenAt) ? 0 : 1) && Number(row.promptPrice) > 0 && String(row.changeCount) === "0") {
+      // A model that has never been repriced is still at its listing price, so its current
+      // price is the price it was listed at.
+      if (String(row.changeCount) === "0") {
         await noteCheapestListed(ctx, { ...model, promptPrice: String(row.promptPrice) } as TrackedModel, String(e.at));
       }
       continue;
@@ -1845,7 +1853,7 @@ async function rebuildRecordsPage(ctx: Ctx, cursor: string | null) {
         if (y > x) await bumpRecord(ctx, "largest-context-jump", { ...who, value: String(y), detail: `${formatContext(String(e.oldValue))} → ${formatContext(String(e.newValue))}` }, (a, b) => a > b);
         continue;
       }
-      if (x <= 0 || y <= 0) continue;
+      if (x < MIN_RECORD_PRICE || y < MIN_RECORD_PRICE) continue;
       const move = ((y - x) / x) * 100;
       if (Math.abs(move) < 3) continue;
       const side = e.field === "promptPrice" ? "input" : "output";
@@ -1876,14 +1884,16 @@ async function rebuildRecordsPage(ctx: Ctx, cursor: string | null) {
 }
 
 async function noteCheapestListed(ctx: Ctx, model: TrackedModel, at: string) {
-  if (isAlias(model.modelId) || !(Number(model.promptPrice) > 0)) return;
+  if (isAlias(model.modelId) || !(Number(model.promptPrice) >= MIN_RECORD_PRICE)) return;
   await bumpRecord(ctx, "cheapest-listed-ever", { modelId: model.modelId, provider: model.provider, at, value: model.promptPrice, detail: `${money(model.promptPrice)} per million input` }, (a, b) => a < b);
 }
 
 /** The day's market summary. Written once per date and overwritten when run again. */
 async function rollup(ctx: Ctx, day: string) {
   const active = await ctx.db.models.withIndex("by_active", (range: any) => range.eq("active", true)).take(1000);
-  const priced = active.filter((row: any) => !isAlias(String(row.modelId)) && Number(row.promptPrice) > 0 && !String(row.modelId).endsWith(":free"));
+  // Standard listings only: a ":batch" or ":free" variant is the same model at a different
+  // tariff, and counting it twice would tilt every basket.
+  const priced = active.filter((row: any) => !isAlias(String(row.modelId)) && Number(row.promptPrice) > 0 && !String(row.modelId).includes(":"));
   const providers = new Set(active.map((row: any) => String(row.provider).replace(/^~/, "")));
   const inputs = priced.map((row: any) => Number(row.promptPrice) * 1_000_000);
   const outputs = priced.map((row: any) => Number(row.completionPrice) * 1_000_000);
@@ -1935,7 +1945,7 @@ async function rollup(ctx: Ctx, day: string) {
   }
   let providerRows = 0;
   for (const [provider, rows] of byProvider) {
-    const paid = rows.filter((r) => Number(r.promptPrice) > 0);
+    const paid = rows.filter((r) => Number(r.promptPrice) > 0 && !String(r.modelId).includes(":"));
     const entry = {
       date: day,
       provider,
