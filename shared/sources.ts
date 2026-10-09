@@ -8,12 +8,26 @@
  * no counterpart, never as a wrong match.
  */
 
-export type SourceName = "modelsdev" | "litellm";
+export type SourceName = "modelsdev" | "litellm" | "openai" | "anthropic" | "cohere";
 
 export const SOURCE_LABEL: Record<string, string> = {
   openrouter: "OpenRouter",
   modelsdev: "models.dev",
   litellm: "LiteLLM",
+  hosts: "hosts",
+  openai: "OpenAI's deprecation page",
+  anthropic: "Anthropic's deprecation page",
+  cohere: "Cohere's deprecation page",
+};
+
+/** Where a lifecycle source publishes, for the "read the notice" link. */
+export const SOURCE_URL: Record<string, string> = {
+  openrouter: "https://openrouter.ai/models",
+  modelsdev: "https://models.dev",
+  litellm: "https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json",
+  openai: "https://developers.openai.com/api/docs/deprecations",
+  anthropic: "https://platform.claude.com/docs/en/about-claude/model-deprecations",
+  cohere: "https://docs.cohere.com/docs/deprecations",
 };
 
 /** Provider slugs from any source, mapped to one canonical slug. */

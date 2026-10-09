@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       job:
-        description: "sweep (loop for ~6h), once (single sweep), or daily"
+        description: "sweep (loop for ~6h), once (single sweep of everything), daily, or backfill (replay LiteLLM history, run once)"
         default: once
 
 jobs:
@@ -30,6 +30,7 @@ jobs:
         env:
           INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
           OBSERVATORY_URL: https://ai-observatory.view.fast
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SCHEDULE: ${{ github.event.schedule }}
           JOB: ${{ github.event.inputs.job }}
         run: |
@@ -38,14 +39,22 @@ jobs:
             node collector/fetch-and-post.mjs daily
             exit 0
           fi
+          if [ "$JOB" = "backfill" ]; then
+            node collector/fetch-and-post.mjs backfill-litellm
+            exit 0
+          fi
           if [ "$JOB" = "once" ]; then
             node collector/fetch-and-post.mjs models
             node collector/fetch-and-post.mjs status
             node collector/fetch-and-post.mjs sources
+            node collector/fetch-and-post.mjs lifecycle
+            node collector/fetch-and-post.mjs hosts
             exit 0
           fi
-          # The other catalogues move daily at most; once per six-hour job is plenty.
+          # The slower-moving sources change daily at most; once per six-hour job is plenty.
           node collector/fetch-and-post.mjs sources || true
+          node collector/fetch-and-post.mjs lifecycle || true
+          node collector/fetch-and-post.mjs hosts || true
           # Sweep loop: ~11 sweeps over ~5h30m, then let the next trigger take over.
           end=$(( $(date +%s) + 5*3600 + 30*60 ))
           while [ "$(date +%s)" -lt "$end" ]; do

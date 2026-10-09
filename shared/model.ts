@@ -6,19 +6,34 @@ export type TrackedModel = {
   modelId: string;
   provider: string;
   name: string;
+  description: string;
+  canonicalSlug: string;
+  huggingFaceId: string;
+  knowledgeCutoff: string;
+  expirationDate: string;
+  aliasTarget: string;
   contextLength: string;
   maxCompletion: string;
   promptPrice: string;
   completionPrice: string;
   cacheReadPrice: string;
   cacheWritePrice: string;
+  tiers: string;
   modality: string;
+  inputModalities: string;
   tokenizer: string;
   supportedParams: string;
+  reasoning: string;
   moderated: boolean;
+  aaIntelligence: string;
+  aaCoding: string;
+  aaAgentic: string;
 };
 
-/** Fields we diff between polls. Order is fixed so the fingerprint is stable. */
+/**
+ * Fields we diff between polls. Order is fixed so the fingerprint is stable. Benchmarks and the
+ * description are stored but not diffed: they move for reasons that are not the provider's decision.
+ */
 export const TRACKED_FIELDS = [
   "name",
   "contextLength",
@@ -30,6 +45,12 @@ export const TRACKED_FIELDS = [
   "modality",
   "tokenizer",
   "supportedParams",
+  "aliasTarget",
+  "expirationDate",
+  "tiers",
+  "knowledgeCutoff",
+  "inputModalities",
+  "reasoning",
 ] as const;
 
 export type TrackedField = (typeof TRACKED_FIELDS)[number];
@@ -47,6 +68,13 @@ export const FIELD_LABELS: Record<string, string> = {
   tokenizer: "tokenizer",
   supportedParams: "parameters",
   moderated: "moderation",
+  aliasTarget: "alias target",
+  expirationDate: "listing expiry",
+  tiers: "long-context pricing",
+  knowledgeCutoff: "knowledge cutoff",
+  inputModalities: "inputs",
+  reasoning: "reasoning",
+  quantization: "quantization",
 };
 
 /**
@@ -69,7 +97,7 @@ export function providerOf(modelId: string): string {
 export function fingerprintOf(model: TrackedModel): string {
   const parts = TRACKED_FIELDS.map((field) => String(model[field] ?? ""));
   parts.push(model.moderated ? "1" : "0");
-  return parts.join("");
+  return parts.join("\u001f");
 }
 
 /** Price per million tokens, which is how everyone actually quotes it. */
@@ -115,6 +143,52 @@ export function shortTime(iso: string): string {
   return `${iso.slice(5, 10)} ${iso.slice(11, 16)}`;
 }
 
+/** "2026-09-09T14:03:00.000Z" to "9 Sep 2026". */
+export function longDate(iso: string): string {
+  if (!iso || iso.length < 10) return iso || "";
+  const d = new Date(iso.length === 10 ? `${iso}T00:00:00Z` : iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+}
+
+/** Whole days between two ISO stamps (either order), rounded down. */
+export function daysBetween(a: string, b: string): number {
+  const x = Date.parse(a.length === 10 ? `${a}T00:00:00Z` : a);
+  const y = Date.parse(b.length === 10 ? `${b}T00:00:00Z` : b);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return 0;
+  return Math.floor(Math.abs(y - x) / 86_400_000);
+}
+
+export type PriceTier = { minPromptTokens: number; prompt: string; completion: string };
+
+/** "200000:0.0000025:0.000015;..." to structured tiers. */
+export function parseTiers(raw: string): PriceTier[] {
+  if (!raw) return [];
+  return raw
+    .split(";")
+    .filter(Boolean)
+    .map((part) => {
+      const [min, prompt, completion] = part.split(":");
+      return { minPromptTokens: Number(min), prompt: prompt ?? "", completion: completion ?? "" };
+    })
+    .filter((t) => Number.isFinite(t.minPromptTokens));
+}
+
+/** Blended price per million the way indexes quote it: three input tokens for every output token. */
+export function blendedPerMillion(promptPrice: string, completionPrice: string): number {
+  const input = Number(promptPrice) * 1_000_000;
+  const output = Number(completionPrice) * 1_000_000;
+  if (!Number.isFinite(input) || !Number.isFinite(output)) return NaN;
+  return (3 * input + output) / 4;
+}
+
+export function median(values: number[]): number {
+  const sorted = values.filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
+  if (sorted.length === 0) return NaN;
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
 export function describeEvent(kind: string, field: string, oldValue: string, newValue: string): string {
   const label = FIELD_LABELS[field] ?? field;
   if (kind === "added") return "appeared";
@@ -129,5 +203,7 @@ export function describeEvent(kind: string, field: string, oldValue: string, new
   if (field === "contextLength" || field === "maxCompletion") {
     return `${label} ${formatContext(oldValue)} to ${formatContext(newValue)}`;
   }
+  if (field === "aliasTarget") return newValue ? `now points at ${newValue}` : "alias target removed";
+  if (field === "expirationDate") return newValue ? `listing expires ${newValue}` : "listing expiry removed";
   return `${label} changed`;
 }

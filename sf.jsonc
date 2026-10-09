@@ -6,5 +6,15 @@
     "server": "server/index.ts",
     "client": "client/index.tsx"
   },
-  "fallback": "/index.html"
+  "fallback": "/index.html",
+  "meta": {
+    "title": "AI Observatory",
+    "description": "The changelog AI providers don't publish: every price, limit, listing and retirement, checked every 30 minutes and kept forever.",
+    "image": "https://ai-observatory.view.fast/og/site.png",
+    "favicon": "/favicon.svg"
+  },
+  // The daily market rollup runs on the platform's own scheduler; collection still runs outside.
+  "crons": [
+    { "path": "/cron/rollup", "schedule": "daily" }
+  ]
 }

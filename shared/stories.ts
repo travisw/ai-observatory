@@ -6,21 +6,11 @@
  * that happened to one model in one sweep, with a headline, a score for how much it matters,
  * and the rows underneath for anyone who wants them.
  */
-import { contextPair, formatContext, money } from "./model";
+import { contextPair, formatContext, longDate, money } from "./model";
 import { isAlias, modelName, providerName } from "./providers";
+import type { ArchiveEvent, HostEvent, LifecycleEvent } from "./types";
 
-export type ArchiveEvent = {
-  id: string;
-  at: string;
-  kind: string;
-  modelId: string;
-  provider: string;
-  field: string;
-  oldValue: string;
-  newValue: string;
-  /** Absent for the OpenRouter archive; set for rows from another catalogue. */
-  source?: string;
-};
+export type { ArchiveEvent } from "./types";
 
 export type StoryKind =
   | "listed"
@@ -30,6 +20,12 @@ export type StoryKind =
   | "resized"
   | "renamed"
   | "capabilities"
+  | "repointed"
+  | "expiring"
+  | "retiring"
+  | "retired"
+  | "hosted"
+  | "unhosted"
   | "drift"
   | "other";
 
@@ -48,7 +44,10 @@ export type Story = {
   events: ArchiveEvent[];
   /** Set when several drift stories were folded into one. */
   folded?: number;
+  /** Absent for the OpenRouter archive; "hosts" for host events; a lifecycle source otherwise. */
   source?: string;
+  /** The hosting provider a host story is about. */
+  host?: string;
   /** Other catalogues that recorded the same move within a week. */
   confirmedBy?: string[];
 };
@@ -71,16 +70,21 @@ const SIZE_LABEL: Record<string, string> = {
   maxCompletion: "max output",
 };
 
-function pct(oldValue: string, newValue: string): number {
+export function pct(oldValue: string, newValue: string): number {
   const before = Number(oldValue);
   const after = Number(newValue);
   if (!Number.isFinite(before) || !Number.isFinite(after) || before === 0) return after === 0 ? 0 : 100;
   return ((after - before) / before) * 100;
 }
 
-function fmtPct(value: number): string {
+export function fmtPct(value: number): string {
   const abs = Math.abs(value);
   return abs >= 10 ? `${Math.round(abs)}%` : `${abs.toFixed(1)}%`;
+}
+
+/** Signed percentage with a real minus sign: "−56%", "+12%". */
+export function signedPct(value: number): string {
+  return `${value < 0 ? "−" : "+"}${fmtPct(value)}`;
 }
 
 function priceMove(e: ArchiveEvent): string {
@@ -100,6 +104,21 @@ function listDiff(oldValue: string, newValue: string): string {
   if (gained.length) parts.push(`gained ${gained.join(", ")}`);
   if (lost.length) parts.push(`lost ${lost.join(", ")}`);
   return parts.join(" · ");
+}
+
+/** The slug after the slash, for a target id we may not have a display name for. */
+function slugName(modelId: string, names: Map<string, string>): string {
+  return modelName(modelId, names.get(modelId));
+}
+
+/** The lead number of a price story, as a signed percentage, for delta chips. */
+export function storyDelta(story: Story): number | null {
+  const lead =
+    story.events.find((e) => e.field === "promptPrice") ??
+    story.events.find((e) => e.field === "completionPrice") ??
+    story.events.find((e) => e.field === "contextLength");
+  if (!lead || !lead.oldValue || !lead.newValue) return null;
+  return pct(lead.oldValue, lead.newValue);
 }
 
 function buildStory(events: ArchiveEvent[], names: Map<string, string>): Story {
@@ -131,7 +150,14 @@ function buildStory(events: ArchiveEvent[], names: Map<string, string>): Story {
   const sizes = events.filter((e) => e.field in SIZE_LABEL).sort((a, b) => (a.field === b.field ? 0 : a.field === "contextLength" ? -1 : 1));
   const renamed = events.find((e) => e.field === "name");
   const params = events.find((e) => e.field === "supportedParams");
-  const rest = events.filter((e) => !prices.includes(e) && !sizes.includes(e) && e !== renamed && e !== params);
+  const repointed = events.find((e) => e.field === "aliasTarget");
+  const expiry = events.find((e) => e.field === "expirationDate");
+  const tiers = events.find((e) => e.field === "tiers");
+  const cutoff = events.find((e) => e.field === "knowledgeCutoff");
+  const inputs = events.find((e) => e.field === "inputModalities");
+  const reasoning = events.find((e) => e.field === "reasoning");
+  const special = new Set<ArchiveEvent | undefined>([renamed, params, repointed, expiry, tiers, cutoff, inputs, reasoning]);
+  const rest = events.filter((e) => !prices.includes(e) && !sizes.includes(e) && !special.has(e));
 
   const details: string[] = [];
   const more: string[] = [];
@@ -161,9 +187,8 @@ function buildStory(events: ArchiveEvent[], names: Map<string, string>): Story {
         .map((e) => ({ label: PRICE_LABEL[e.field], move: pct(e.oldValue, e.newValue) }))
         .filter((n) => Math.abs(n.move) >= DRIFT_THRESHOLD_PCT);
       if (named.length === 0) named.push({ label: PRICE_LABEL[lead.field], move: pct(lead.oldValue, lead.newValue) });
-      const signed = (m: number) => `${m < 0 ? "−" : "+"}${fmtPct(m)}`;
       if (!allDown && !allUp) {
-        headline = `${provider} repriced ${model}: ${named.map((n) => `${n.label} ${signed(n.move)}`).join(", ")}`;
+        headline = `${provider} repriced ${model}: ${named.map((n) => `${n.label} ${signedPct(n.move)}`).join(", ")}`;
       } else {
         const verb = allDown ? "cut" : "raised";
         const spread = named.length > 1 ? Math.abs(named[0].move - named[1].move) : 0;
@@ -191,12 +216,57 @@ function buildStory(events: ArchiveEvent[], names: Map<string, string>): Story {
     }
   }
 
+  // An alias moving to a new model is the most dangerous silent change there is: the same id
+  // starts answering with a different model. It outranks everything but a removal.
+  if (repointed) {
+    const target = repointed.newValue ? slugName(repointed.newValue, names) : "";
+    more.push(repointed.oldValue ? `previously pointed at ${slugName(repointed.oldValue, names)}` : "alias target first recorded");
+    if (score < 78) {
+      kind = "repointed";
+      score = 78;
+      headline = target ? `${model} now points at ${target}` : `${model} lost its target`;
+      details.unshift(repointed.oldValue ? `${slugName(repointed.oldValue, names)} → ${target}` : target);
+    }
+  }
+
+  if (expiry) {
+    if (score < 65) {
+      kind = "expiring";
+      score = 65;
+      headline = expiry.newValue
+        ? `${provider} will remove ${model} on ${longDate(expiry.newValue)}`
+        : `${model} is no longer scheduled for removal`;
+      details.unshift(expiry.oldValue && expiry.newValue ? `was ${longDate(expiry.oldValue)}` : "");
+    } else {
+      more.push(expiry.newValue ? `listing expires ${longDate(expiry.newValue)}` : "listing expiry removed");
+    }
+  }
+
   if (renamed) {
     more.push(`renamed from "${renamed.oldValue}"`);
     if (score < 20) {
       kind = "renamed";
       score = 20;
       headline = `${provider} renamed ${modelName(first.modelId, renamed.oldValue)} to ${modelName(first.modelId, renamed.newValue)}`;
+    }
+  }
+
+  if (inputs) {
+    const diff = listDiff(inputs.oldValue, inputs.newValue);
+    more.push(`inputs: ${diff || "changed"}`);
+    if (score < 25) {
+      kind = "capabilities";
+      score = 25;
+      headline = `${model} ${diff ? diff.replace(/gained/, "now accepts").replace(/lost/, "no longer accepts") : "changed inputs"}`;
+    }
+  }
+
+  if (reasoning) {
+    more.push(`reasoning: ${reasoning.oldValue || "none"} → ${reasoning.newValue || "none"}`);
+    if (score < 22) {
+      kind = "capabilities";
+      score = 22;
+      headline = reasoning.newValue ? `${model} gained ${reasoning.newValue} reasoning` : `${model} lost reasoning`;
     }
   }
 
@@ -210,10 +280,24 @@ function buildStory(events: ArchiveEvent[], names: Map<string, string>): Story {
     }
   }
 
+  if (tiers) {
+    more.push(tiers.newValue ? "long-context pricing changed" : "long-context pricing removed");
+    if (score < 18) {
+      kind = "repriced";
+      score = 18;
+      headline = `${provider} changed ${model} long-context pricing`;
+    }
+  }
+
+  if (cutoff) more.push(`knowledge cutoff ${cutoff.oldValue || "unknown"} → ${cutoff.newValue || "unknown"}`);
   for (const e of rest) more.push(`${e.field} changed`);
   if (!headline) headline = `${provider} changed ${model}`;
 
-  return { ...base, kind, score, headline, detail: details.join(" · "), more };
+  // A rolling alias is routed, not priced: its quoted price follows whichever model it points at
+  // today. Its price moves are worth recording but should not outrank a model's own decision.
+  if (isAlias(first.modelId) && (kind === "repriced" || kind === "resized")) score = Math.round(score * 0.6);
+
+  return { ...base, kind, score, headline, detail: details.filter(Boolean).join(" · "), more };
 }
 
 /**
@@ -232,7 +316,9 @@ export function foldAliases(stories: Story[]): Story[] {
       .sort()
       .join(",")}`;
   const concrete = new Set(stories.filter((s) => !isAlias(s.modelId)).map(signature));
-  return stories.filter((s) => !isAlias(s.modelId) || s.kind === "listed" || s.kind === "delisted" || !concrete.has(signature(s)));
+  return stories.filter(
+    (s) => !isAlias(s.modelId) || s.kind === "listed" || s.kind === "delisted" || s.kind === "repointed" || !concrete.has(signature(s))
+  );
 }
 
 /**
@@ -300,7 +386,150 @@ export function groupStories(events: ArchiveEvent[], names: Map<string, string>)
     else groups.set(key, [e]);
   }
   const stories = [...groups.values()].map((g) => buildStory(g, names));
+  return sortStories(stories);
+}
+
+export function sortStories(stories: Story[]): Story[] {
   return stories.sort((a, b) => (a.at === b.at ? b.score - a.score : a.at < b.at ? 1 : -1));
+}
+
+/**
+ * Stories about where a model is served from. One per (model, host, sweep). Scored below the
+ * model's own stories: a host repricing is a routing fact, a provider repricing is a decision.
+ */
+export function hostStories(events: HostEvent[], names: Map<string, string>): Story[] {
+  const groups = new Map<string, HostEvent[]>();
+  for (const e of events) {
+    const key = `${e.modelId}|${e.tag}|${e.at}`;
+    const list = groups.get(key);
+    if (list) list.push(e);
+    else groups.set(key, [e]);
+  }
+  const out: Story[] = [];
+  for (const [key, group] of groups) {
+    const first = group[0];
+    const model = modelName(first.modelId, names.get(first.modelId));
+    const asArchive: ArchiveEvent[] = group.map((e) => ({
+      id: e.id, at: e.at, kind: e.kind, modelId: e.modelId, provider: first.host, field: e.field,
+      oldValue: e.oldValue, newValue: e.newValue, source: "hosts",
+    }));
+    const base = { key: `hosts|${key}`, at: first.at, modelId: first.modelId, provider: first.modelId.split("/")[0], events: asArchive, source: "hosts", host: first.host, more: [] as string[] };
+    const lifecycle = group.find((e) => e.kind !== "changed");
+    if (lifecycle) {
+      if (lifecycle.kind === "removed") {
+        out.push({ ...base, kind: "unhosted", score: 32, headline: `${first.host} stopped serving ${model}`, detail: "" });
+      } else {
+        out.push({ ...base, kind: "hosted", score: 24, headline: `${model} is now served by ${first.host}`, detail: lifecycle.kind === "returned" ? "back after a gap" : "" });
+      }
+      continue;
+    }
+    const prices = group.filter((e) => e.field === "promptPrice" || e.field === "completionPrice");
+    const others = group.filter((e) => !prices.includes(e));
+    const more = others.map((e) =>
+      e.field === "contextLength" || e.field === "maxCompletion"
+        ? `${SIZE_LABEL[e.field]} ${contextPair(e.oldValue, e.newValue)}`
+        : `${e.field} ${e.oldValue || "none"} → ${e.newValue || "none"}`
+    );
+    if (prices.length) {
+      const moves = prices.map((e) => pct(e.oldValue, e.newValue));
+      const biggest = Math.max(...moves.map(Math.abs));
+      const lead = prices.find((e) => e.field === "promptPrice") ?? prices[0];
+      const leadMove = pct(lead.oldValue, lead.newValue);
+      const detail = prices.map((e) => `${PRICE_LABEL[e.field]} ${money(e.oldValue)} → ${money(e.newValue)}`).join(" · ");
+      if (biggest < DRIFT_THRESHOLD_PCT) {
+        out.push({ ...base, kind: "drift", score: 4, headline: `${first.host} moved ${model} price ${fmtPct(leadMove)}`, detail, more });
+      } else {
+        const allDown = moves.every((m) => m <= 0);
+        const allUp = moves.every((m) => m >= 0);
+        const verb = allDown ? "cut" : allUp ? "raised" : "repriced";
+        out.push({
+          ...base, kind: "repriced", score: 20 + Math.min(25, biggest / 2),
+          headline: `${first.host} ${verb} ${model} ${prices.length > 1 ? "prices" : `${PRICE_LABEL[lead.field]} price`}${verb === "repriced" ? "" : ` ${fmtPct(Math.abs(leadMove))}`}`,
+          detail, more,
+        });
+      }
+      continue;
+    }
+    out.push({ ...base, kind: "other", score: 8, headline: `${first.host} changed how it serves ${model}`, detail: more.join(" · "), more: [] });
+  }
+  return sortStories(out);
+}
+
+/** Stories from the providers' own deprecation notices. One per (source, model, sweep). */
+export function lifecycleStories(events: LifecycleEvent[]): Story[] {
+  const groups = new Map<string, LifecycleEvent[]>();
+  for (const e of events) {
+    const key = `${e.source}|${e.modelId}|${e.at}`;
+    const list = groups.get(key);
+    if (list) list.push(e);
+    else groups.set(key, [e]);
+  }
+  const out: Story[] = [];
+  for (const [key, group] of groups) {
+    const first = group[0];
+    const provider = providerName(first.provider);
+    const model = first.modelId;
+    const asArchive: ArchiveEvent[] = group.map((e) => ({
+      id: e.id, at: e.at, kind: e.kind, modelId: e.key, provider: e.provider, field: e.field,
+      oldValue: e.oldValue, newValue: e.newValue, source: e.source,
+    }));
+    const base = { key: `${first.source}|${key}`, at: first.at, modelId: first.key, provider: first.provider, events: asArchive, source: first.source, more: [] as string[] };
+    const field = (name: string) => group.find((e) => e.field === name);
+    const stateNow = field("state")?.newValue ?? "";
+    const retires = field("retiresAt");
+    const replacement = field("replacement");
+    const added = group.find((e) => e.kind === "added");
+    const more: string[] = [];
+    if (replacement?.newValue) more.push(`replacement: ${replacement.newValue}`);
+
+    if (added) {
+      // A new row on a deprecation page: the newValue of the "added" event carries the state,
+      // and the sibling rows carry the dates.
+      const state = added.newValue || stateNow;
+      const when = retires?.newValue;
+      if (state === "retired") {
+        out.push({ ...base, kind: "retired", score: 72, headline: `${provider} retired ${model}`, detail: when ? `retired ${longDate(when)}` : "", more });
+      } else if (state === "deprecated") {
+        out.push({
+          ...base, kind: "retiring", score: 85,
+          headline: when ? `${provider} will retire ${model} on ${longDate(when)}` : `${provider} deprecated ${model}`,
+          detail: when ? `${Math.max(0, Math.round((Date.parse(when) - Date.parse(first.at)) / 86_400_000))} days' notice` : "retirement date to be announced",
+          more,
+        });
+      } else {
+        out.push({ ...base, kind: "other", score: 12, headline: `${provider} published a lifecycle entry for ${model}`, detail: when ? `supported until at least ${longDate(when)}` : "", more });
+      }
+      continue;
+    }
+    if (group.some((e) => e.kind === "removed")) {
+      out.push({ ...base, kind: "other", score: 10, headline: `${model} left ${provider}'s deprecation page`, detail: "", more });
+      continue;
+    }
+    const state = field("state");
+    if (state?.newValue === "retired") {
+      out.push({ ...base, kind: "retired", score: 72, headline: `${provider} retired ${model}`, detail: retires?.newValue ? `on ${longDate(retires.newValue)}` : "", more });
+      continue;
+    }
+    if (state?.newValue === "deprecated") {
+      out.push({
+        ...base, kind: "retiring", score: 85,
+        headline: retires?.newValue ? `${provider} will retire ${model} on ${longDate(retires.newValue)}` : `${provider} deprecated ${model}`,
+        detail: "", more,
+      });
+      continue;
+    }
+    if (retires) {
+      const moved = retires.oldValue && retires.newValue ? (retires.newValue > retires.oldValue ? "pushed back" : "brought forward") : "set";
+      out.push({
+        ...base, kind: "retiring", score: 70,
+        headline: retires.newValue ? `${provider} ${moved} ${model}'s retirement to ${longDate(retires.newValue)}` : `${provider} dropped the retirement date for ${model}`,
+        detail: retires.oldValue ? `was ${longDate(retires.oldValue)}` : "", more,
+      });
+      continue;
+    }
+    out.push({ ...base, kind: "other", score: 10, headline: `${provider} updated ${model}'s lifecycle entry`, detail: group.map((e) => `${e.field}: ${e.oldValue || "none"} → ${e.newValue || "none"}`).join(" · "), more });
+  }
+  return sortStories(out);
 }
 
 /**
@@ -315,7 +544,7 @@ export function foldDrift(stories: Story[]): Story[] {
       out.push(s);
       continue;
     }
-    const key = `${s.modelId}|${s.at.slice(0, 10)}`;
+    const key = `${s.source ?? ""}|${s.host ?? ""}|${s.modelId}|${s.at.slice(0, 10)}`;
     const existing = folded.get(key);
     if (!existing) {
       const copy = { ...s, folded: 1, events: [...s.events] };
@@ -332,8 +561,8 @@ export function foldDrift(stories: Story[]): Story[] {
     const oldest = lead[lead.length - 1];
     const newest = lead[0];
     const net = oldest && newest ? pct(oldest.oldValue, newest.newValue) : 0;
-    const model = s.headline.replace(/ price drifted.*$/, "");
-    s.headline = `${model} price moved ${s.folded} times, net ${net < 0 ? "−" : "+"}${fmtPct(net)}`;
+    const model = s.headline.replace(/ price (moved|drifted).*$/, "");
+    s.headline = `${model} price moved ${s.folded} times, net ${signedPct(net)}`;
     s.detail = oldest && newest ? `input ${money(oldest.oldValue)} → ${money(newest.newValue)} over the day` : s.detail;
   }
   return out;
@@ -353,7 +582,7 @@ export function corroborate(stories: Story[], keyOf: (s: Story) => string): Stor
   };
   const others = new Map<string, Story[]>();
   for (const s of stories) {
-    if (!s.source) continue;
+    if (!s.source || s.source === "hosts") continue;
     const k = keyOf(s);
     const list = others.get(k);
     if (list) list.push(s);
@@ -390,8 +619,16 @@ export function headlines(stories: Story[], now: number, limit = 6): { stories: 
 /** Counts by kind since a moment, for the "this week" line. */
 export function tally(stories: Story[], since: string): Record<StoryKind, number> {
   const counts: Record<StoryKind, number> = {
-    listed: 0, delisted: 0, relisted: 0, repriced: 0, resized: 0, renamed: 0, capabilities: 0, drift: 0, other: 0,
+    listed: 0, delisted: 0, relisted: 0, repriced: 0, resized: 0, renamed: 0, capabilities: 0,
+    repointed: 0, expiring: 0, retiring: 0, retired: 0, hosted: 0, unhosted: 0, drift: 0, other: 0,
   };
   for (const s of stories) if (s.at >= since) counts[s.kind] += s.folded ?? 1;
   return counts;
+}
+
+/** Comma-separated watch terms; a story matches if any term appears in its model id, provider or headline. */
+export function matchesWatch(story: Story, terms: string[]): boolean {
+  if (terms.length === 0) return true;
+  const hay = `${story.modelId} ${story.provider} ${providerName(story.provider)} ${story.headline} ${story.host ?? ""}`.toLowerCase();
+  return terms.some((t) => hay.includes(t));
 }
