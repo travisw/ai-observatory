@@ -1,41 +1,25 @@
 /**
- * Home: the hall. A stack of split-flap boards (now, departures, arrivals, prices, status)
- * and, under them, the logbook of everything recorded. One subscription feeds the lot.
+ * Today: the lead story with its figures, the rest of the day's changes, the price index,
+ * status, what is retiring, what is new, and the records. One subscription feeds the page,
+ * plus the daily rollup for the index chart.
  */
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo } from "preact/hooks";
 import { Link, useQuery } from "@spacefast/zero/client";
+
 import { formatContext, money } from "../../shared/model";
 import { isAlias, providerName } from "../../shared/providers";
 import { headlines, type Story } from "../../shared/stories";
-import type { ArchiveEvent, HomeModel, HomePageData, LifecycleRow, StatusRow } from "../../shared/types";
-import { Board, ColumnHeads, FlapRow, FlapText, Sign, type FlapTone } from "../components/Flap";
-import { LogDay, PageSkeleton, Stencil, StoryLine } from "../components/Log";
-import { boardDate, boardPct, boardTime, boardWhen, departureStatus, remarkWord, shortName, statusWord } from "../lib/board";
-import { uptimeDays, type DayState } from "../lib/series";
-import { KIND_GROUPS, assembleStories, deltaIsGood, keyIndex, kindInGroup, nameIndex, storyDelta, storyHref } from "../lib/stories";
+import type { DailyRow, HomeModel, HomePageData, LifecycleRow, RecordRow } from "../../shared/types";
+import { Delta, Fig, LineChart, More, Pill, Rec, Section, Skeleton, StoryRow, StoryTable } from "../components/Wire";
 import { provideFreshness } from "../lib/freshness";
-import { DAY, ago, dayLabel, daysUntil, modelHref, plural, readStorage, usePageTitle, useSearchParams, writeStorage } from "../lib/util";
-import { matchesWatch, useWatchlist } from "../lib/watch";
+import { assembleStories, deltaIsGood, keyIndex, nameIndex, storyDelta, storyHref } from "../lib/stories";
+import { dayShort, daysLeft, hm, shortName, statusWord } from "../lib/text";
+import { DAY, daysUntil, modelHref, plural, providerHref, usePageTitle } from "../lib/util";
 
-const LAST_VISIT = "observatory.lastVisit";
+type Departure = { key: string; model: string; provider: string; providerSlug: string; retiresAt: string; replacement: string; href: string | null; source: string };
 
-const DAY_CLASS: Record<DayState, string> = { up: "bg-success", degraded: "bg-warning", down: "bg-danger", none: "bg-line" };
-
-/** One small flap per day, in the day's real colour; dim when nothing was recorded. */
-export function UptimeStrip(props: { days: { day: string; state: DayState }[]; label: string }) {
-  return (
-    <span class="inline-flex items-center gap-[2px]" role="img" aria-label={props.label}>
-      {props.days.map((d) => (
-        <span key={d.day} class={`block h-[14px] w-[6px] rounded-[1px] ${DAY_CLASS[d.state]} ${d.state === "none" ? "opacity-60" : ""}`} title={`${d.day}: ${d.state === "none" ? "no record" : d.state}`} />
-      ))}
-    </span>
-  );
-}
-
-type Departure = { key: string; model: string; provider: string; retiresAt: string; replacement: string; href: string | null; label: string };
-
-/** Lifecycle notices and OpenRouter expiries as one departures list, soonest first, dated ones only. */
-function departures(rows: LifecycleRow[], models: HomeModel[], keys: Map<string, string>): Departure[] {
+/** Lifecycle notices and catalogue expiries as one list, soonest first, dated ones only. */
+export function departures(rows: LifecycleRow[], models: HomeModel[], keys: Map<string, string>): Departure[] {
   const rank: Record<string, number> = { openai: 0, anthropic: 0, cohere: 0, modelsdev: 1, litellm: 2 };
   const seen = new Map<string, Departure>();
   for (const row of rows.slice().sort((a, b) => (rank[a.source] ?? 3) - (rank[b.source] ?? 3))) {
@@ -47,10 +31,11 @@ function departures(rows: LifecycleRow[], models: HomeModel[], keys: Map<string,
       key: id,
       model: row.modelId.includes("/") ? row.modelId.slice(row.modelId.indexOf("/") + 1) : row.modelId,
       provider: providerName(row.provider),
+      providerSlug: row.provider,
       retiresAt: row.retiresAt,
       replacement: row.replacement,
       href: tracked ? modelHref(tracked) : null,
-      label: `${providerName(row.provider)} retires ${row.modelId} on ${row.retiresAt}${row.replacement ? `, replacement ${row.replacement}` : ""}`,
+      source: row.source,
     });
   }
   for (const m of models) {
@@ -61,37 +46,47 @@ function departures(rows: LifecycleRow[], models: HomeModel[], keys: Map<string,
       key: id,
       model: shortName(m.modelId, m.name),
       provider: providerName(m.provider),
+      providerSlug: m.provider,
       retiresAt: m.expirationDate,
       replacement: "",
       href: modelHref(m.modelId),
-      label: `${shortName(m.modelId, m.name)} leaves the catalogue on ${m.expirationDate}`,
+      source: "openrouter",
     });
   }
-  // Upcoming first, soonest at the top; then the three most recently departed, for the record.
-  const all = [...seen.values()];
-  const upcoming = all.filter((d) => daysUntil(d.retiresAt) >= 0).sort((a, b) => a.retiresAt.localeCompare(b.retiresAt));
-  const departed = all.filter((d) => daysUntil(d.retiresAt) < 0).sort((a, b) => b.retiresAt.localeCompare(a.retiresAt)).slice(0, 3);
-  return [...upcoming, ...departed];
+  return [...seen.values()].filter((d) => daysUntil(d.retiresAt) >= 0).sort((a, b) => a.retiresAt.localeCompare(b.retiresAt));
 }
+
+/** The price pair a story moved, from its events: input and output, old and new, per million. */
+function figures(story: Story) {
+  const find = (field: string) => story.events.find((e) => e.field === field && e.oldValue && e.newValue);
+  const input = find("promptPrice");
+  const output = find("completionPrice");
+  const context = find("contextLength");
+  return { input, output, context };
+}
+
+/** Longest unchanged price is a property of the present, so it is computed here rather than stored. */
+function longestUnchanged(models: HomeModel[]): { modelId: string; days: number } | null {
+  let best: { modelId: string; since: string } | null = null;
+  for (const m of models) {
+    if (isAlias(m.modelId) || !(Number(m.promptPrice) > 0)) continue;
+    const since = m.lastChangedAt || m.firstSeenAt || "";
+    if (!since) continue;
+    if (!best || since < best.since) best = { modelId: m.modelId, since };
+  }
+  return best ? { modelId: best.modelId, days: Math.floor((Date.now() - Date.parse(best.since)) / DAY) } : null;
+}
+
+const SOURCE_WORD: Record<string, string> = { openai: "provider notice", anthropic: "provider notice", cohere: "provider notice", litellm: "price list", modelsdev: "models.dev", openrouter: "catalogue expiry" };
 
 export function HomePage() {
   usePageTitle("");
-  const params = useSearchParams();
-  const kindFilter = params.get("kind") ?? "";
-  const watchOnly = params.get("watch") === "1";
-
-  // One subscription for the whole page: a burst of parallel requests gets rate-limited.
   const page = useQuery<HomePageData>("homePage");
+  const daily = useQuery<DailyRow[]>("dailyStats", 60);
   const ready = Boolean(page) && !Array.isArray(page) && Array.isArray(page.models);
   useEffect(() => { if (ready) provideFreshness(page.freshness.models); }, [ready, page]);
-  const [watchlist] = useWatchlist();
-
-  // "New since your last visit": read the previous stamp once, then move it to now.
-  const [lastVisit] = useState(() => readStorage<string>(LAST_VISIT, ""));
-  useEffect(() => { writeStorage(LAST_VISIT, new Date().toISOString()); }, []);
 
   const models = ready ? page.models : [];
-  const events = ready ? page.events : [];
   const names = useMemo(() => nameIndex(models), [models]);
   const keys = useMemo(() => keyIndex(models), [models]);
   const byId = useMemo(() => new Map(models.map((m) => [m.modelId, m])), [models]);
@@ -100,267 +95,196 @@ export function HomePage() {
     [ready, page, names],
   );
 
-  if (!ready) return <PageSkeleton />;
+  if (!ready) return <Skeleton rows={10} />;
 
   const now = Date.now();
   const today = new Date(now).toISOString().slice(0, 10);
-  const visible = stories.filter((s) => (!watchOnly || matchesWatch(s, watchlist)) && (!kindFilter || kindInGroup(s.kind, kindFilter)));
+  const checked = page.freshness.models ?? "";
 
-  // NOW
+  // The ticker.
   const providers = new Set(models.map((m) => m.provider.replace(/^~/, "")));
-  const changesToday = stories.filter((s) => s.at.slice(0, 10) === today && s.kind !== "drift").length;
-  const statuses: StatusRow[] = page.statuses;
-  const delayed = statuses.filter((s) => s.indicator !== "none" && s.indicator !== "unreachable" && s.indicator !== "unknown").length;
+  const todays = stories.filter((s) => s.at.slice(0, 10) === today && s.kind !== "drift");
+  const cuts = todays.filter((s) => { const d = s.kind === "repriced" ? storyDelta(s) : null; return d !== null && d < 0; }).length;
+  const rises = todays.filter((s) => { const d = s.kind === "repriced" ? storyDelta(s) : null; return d !== null && d > 0; }).length;
+  const statuses = page.statuses;
+  const degraded = statuses.filter((s) => s.indicator !== "none" && s.indicator !== "unreachable" && s.indicator !== "unknown").length;
+  const leaving = departures(page.retiring ?? [], models, keys);
+  const leavingSoon = leaving.filter((d) => daysUntil(d.retiresAt) <= 31).length;
 
-  // DEPARTURES
-  const allLeaving = departures(page.retiring ?? [], models, keys);
-  const leaving = [...allLeaving.filter((d) => daysUntil(d.retiresAt) >= 0).slice(0, 10), ...allLeaving.filter((d) => daysUntil(d.retiresAt) < 0)];
-  const departingSoon = allLeaving.filter((d) => { const days = daysUntil(d.retiresAt); return days >= 0 && days <= 30; }).length;
+  // The lead: the strongest story of the last day (or the shortest window that has three), aliases aside.
+  const candidates = stories.filter((s) => s.kind !== "drift" && !isAlias(s.modelId) && s.source !== "hosts");
+  const picked = headlines(candidates, now, 12);
+  const lead = picked.stories[0];
+  const rest = stories.filter((s) => s !== lead && s.kind !== "drift").slice(0, 8);
+  const changesToday = todays.length;
+  const fig = lead ? figures(lead) : null;
+  const leadDelta = lead ? storyDelta(lead) : null;
+  const leadGood = lead && leadDelta !== null ? deltaIsGood(lead, leadDelta) : true;
+  const leadTone = leadDelta === null ? "" : leadGood ? "cut" : "rise";
+  const leadHref = lead ? storyHref(lead, keys) : null;
+  const leadDay = lead ? (lead.at.slice(0, 10) === today ? `${hm(lead.at)} UTC` : `${dayShort(lead.at)}, ${hm(lead.at)} UTC`) : "";
 
-  // ARRIVALS
-  const fortnight = new Date(now - 14 * DAY).toISOString();
-  const arrivalsSeen = new Set<string>();
-  const arrivals: { event: ArchiveEvent; model: HomeModel | undefined }[] = [];
-  for (const e of events) {
-    if ((e.kind !== "added" && e.kind !== "returned") || e.at < fortnight || isAlias(e.modelId) || arrivalsSeen.has(e.modelId)) continue;
-    arrivalsSeen.add(e.modelId);
-    arrivals.push({ event: e, model: byId.get(e.modelId) });
-    if (arrivals.length >= 10) break;
-  }
+  // The index chart from the daily rollup.
+  const days = Array.isArray(daily) ? daily : [];
+  const num = (v: string) => Number(v);
+  const indexSeries = [
+    { label: "Frontier", color: "#ece9e0", values: days.map((d) => num(d.frontierIn)).filter(Number.isFinite) },
+    { label: "Mid", color: "#9fb3ff", values: days.map((d) => num(d.midIn)).filter(Number.isFinite) },
+    { label: "Budget", color: "#5fcf8a", values: days.map((d) => num(d.budgetIn)).filter(Number.isFinite) },
+  ];
+  const latestDay = days.length ? days[days.length - 1] : null;
 
-  // PRICE BOARD
-  const priced = visible.filter((s) => !s.source && (s.kind === "repriced" || s.kind === "resized" || s.kind === "delisted" || s.kind === "repointed"));
-  const lead = headlines(priced, now, 10);
-  const windowLabel = lead.windowHours === 24 ? "last 24 hours" : lead.windowHours === 72 ? "last 3 days" : lead.windowHours === 168 ? "last 7 days" : lead.windowHours === 720 ? "last 30 days" : "all time";
+  // New this week: first listings, aliases aside.
+  const week = new Date(now - 7 * DAY).toISOString();
+  const seenNew = new Set<string>();
+  const fresh = stories.filter((s) => {
+    if ((s.kind !== "listed" && s.kind !== "relisted") || s.at < week || s.source || isAlias(s.modelId) || seenNew.has(s.modelId)) return false;
+    seenNew.add(s.modelId);
+    return true;
+  }).slice(0, 8);
 
-  // THE LOG
-  const record = visible.filter((s) => s.kind !== "drift").slice(0, 60);
-  const byDay = new Map<string, Story[]>();
-  for (const s of record) {
-    const key = s.at.slice(0, 10);
-    const list = byDay.get(key);
-    if (list) list.push(s);
-    else byDay.set(key, [s]);
-  }
-  let dividerPlaced = !lastVisit;
-
-  const query = (extra: string) => {
-    const q = new URLSearchParams();
-    if (watchOnly) q.set("watch", "1");
-    if (extra) q.set("kind", extra);
-    const s = q.toString();
-    return s ? `/?${s}` : "/";
-  };
+  // Records.
+  const rec = (key: string): RecordRow | undefined => page.records.find((r) => r.key === key);
+  const unchanged = longestUnchanged(models);
+  const cutIn = rec("biggest-cut-input");
+  const ctx = rec("largest-context-jump");
+  const shortest = rec("shortest-lived");
+  const holder = (id: string) => shortName(id, names.get(id));
 
   return (
-    <div class="flex flex-col gap-8">
-      {/* NOW */}
-      <div class="flex max-w-full flex-wrap gap-x-8 gap-y-4" aria-label="Right now">
-        {[
-          { label: "Models", value: String(models.length), width: 4, href: "/models", tone: "ink" as FlapTone, aria: `${models.length} models` },
-          { label: "Providers", value: String(providers.size), width: 4, href: "/status", tone: "ink" as FlapTone, aria: `${providers.size} providers` },
-          { label: "Changes today", value: String(changesToday), width: 4, href: "/changes", tone: "ink" as FlapTone, aria: `${changesToday} changes today` },
-          { label: "Departing soon", value: String(departingSoon), width: 4, href: "/retiring", tone: (departingSoon ? "warning" : "ink") as FlapTone, aria: `${departingSoon} models retiring within 30 days` },
-          { label: "Systems", value: statuses.length === 0 ? "PENDING" : delayed === 0 ? "ON TIME" : `${delayed} DELAYED`, width: 9, href: "/status", tone: (statuses.length === 0 ? "muted" : delayed === 0 ? "success" : "warning") as FlapTone, aria: statuses.length === 0 ? "status pending" : delayed === 0 ? "all systems on time" : `${delayed} systems delayed` },
-        ].map((item, i) => (
-          <Link key={item.label} to={item.href} class="flex max-w-full flex-col gap-1.5 overflow-x-auto" aria-label={item.aria}>
-            <span class="text-[11px] font-semibold uppercase tracking-[0.3em] text-ink-muted">{item.label}</span>
-            <FlapText text={item.value} width={item.width} size="lg" tone={item.tone} delay={i * 40} />
-          </Link>
-        ))}
+    <div>
+      <div class="ticker" aria-label="Right now">
+        <span><b>{models.length}</b> models</span>
+        <span><b>{providers.size}</b> providers</span>
+        <span><b>{changesToday}</b> {changesToday === 1 ? "change" : "changes"} today</span>
+        {cuts + rises > 0 ? <span><b class="cut">{cuts}</b> {cuts === 1 ? "cut" : "cuts"} · <b class="rise">{rises}</b> {rises === 1 ? "rise" : "rises"}</span> : null}
+        <span><b>{leavingSoon}</b> retiring this month</span>
+        <span>{statuses.length === 0 ? <b class="soft">status pending</b> : degraded === 0 ? <b class="cut">all operational</b> : <b class="warn">{degraded} degraded</b>}</span>
+        {checked ? <span>checked <b>{hm(checked)}</b> UTC</span> : null}
       </div>
 
-      {/* DEPARTURES */}
-      <Board label="Departures" hint="retirements announced by the providers" action={<Sign to="/retiring">All departures</Sign>}>
-        <ColumnHeads columns={[{ label: "Retires", width: 6, sticky: true }, { label: "Model", width: 22, sticky: true }, { label: "Provider", width: 9 }, { label: "Gate", width: 16 }, { label: "Status", width: 10 }]} />
-        {leaving.length === 0 ? (
-          <p class="px-3 py-4 text-sm text-ink-muted">No departures announced.</p>
-        ) : (
-          leaving.map((d, i) => {
-            const status = departureStatus(d.retiresAt);
-            const gone = status.word === "DEPARTED";
-            return (
-              <FlapRow
-                key={d.key}
-                href={d.href}
-                label={d.label}
-                delay={i * 40}
-                class={gone ? "opacity-60" : ""}
-                columns={[
-                  { text: boardDate(d.retiresAt), width: 6, sticky: true, tone: "muted" },
-                  { text: d.model, width: 22, sticky: true, tone: gone ? "danger" : "ink" },
-                  { text: d.provider, width: 9, tone: "muted" },
-                  { text: d.replacement ? d.replacement : "-", width: 16, tone: d.replacement ? "ink" : "muted" },
-                  { text: status.word, width: 10, tone: status.tone },
-                ]}
-              />
-            );
-          })
-        )}
-      </Board>
+      <div class="lead">
+        <article>
+          {lead ? (
+            <>
+              <span class="kicker">Lead · {providerName(lead.provider)} · {leadDay}</span>
+              <h1>{leadHref ? <Link to={leadHref} class="hl">{lead.headline}</Link> : lead.headline}</h1>
+              {fig && (fig.input || fig.output || fig.context) ? (
+                <div class="fig">
+                  {fig.input ? <Fig label="Input / M" old={money(fig.input.oldValue)} value={money(fig.input.newValue)} tone={leadTone} /> : null}
+                  {fig.output ? <Fig label="Output / M" old={money(fig.output.oldValue)} value={money(fig.output.newValue)} tone={leadTone} /> : null}
+                  {fig.context ? <Fig label="Context" old={formatContext(fig.context.oldValue)} value={formatContext(fig.context.newValue)} tone={leadTone} /> : null}
+                  {leadDelta !== null ? <Fig label="Change" value={<Delta value={leadDelta} good={leadGood} />} /> : null}
+                </div>
+              ) : lead.detail ? <p class="deck num">{lead.detail}</p> : null}
+              <p class="deck">
+                {lead.kind === "repriced" || lead.kind === "resized"
+                  ? <>{providerName(lead.provider)} changed the listing at {hm(lead.at)} UTC, one of {plural(changesToday, "change")} recorded today. {lead.confirmedBy?.length ? `The same move is on ${lead.confirmedBy.join(" and ")}.` : "The other catalogues we check have not recorded it yet."}</>
+                  : <>Recorded at {hm(lead.at)} UTC, one of {plural(changesToday, "change")} today.{lead.more.length ? ` Also: ${lead.more.join("; ")}.` : ""}</>}
+                {leadHref ? <> <Link to={leadHref}>Full history of {holder(lead.modelId)} →</Link></> : null}
+              </p>
+            </>
+          ) : (
+            <p class="deck">Nothing recorded yet. The first changes appear after the next check.</p>
+          )}
+          <Section title={changesToday > 1 ? "Also today" : "Recent"} action={<More to="/changes">All changes</More>}>
+            {rest.length === 0 ? <p class="note">No other changes yet.</p> : (
+              <StoryTable label="Recent changes">
+                {rest.map((s) => <StoryRow key={s.key} story={s} href={storyHref(s, keys)} date={s.at.slice(0, 10) !== today} />)}
+              </StoryTable>
+            )}
+          </Section>
+        </article>
 
-      {/* ARRIVALS */}
-      <Board label="Arrivals" hint="listed in the last 14 days" action={<Sign to="/changes?kind=listings">All arrivals</Sign>}>
-        <ColumnHeads columns={[{ label: "Time", width: 12, sticky: true }, { label: "Model", width: 22, sticky: true }, { label: "Provider", width: 9 }, { label: "In $/M", width: 7, align: "right" }, { label: "Out $/M", width: 7, align: "right" }, { label: "Status", width: 8 }]} />
-        {arrivals.length === 0 ? (
-          <p class="px-3 py-4 text-sm text-ink-muted">Nothing new in the last two weeks.</p>
-        ) : (
-          arrivals.map(({ event, model }, i) => {
-            const name = shortName(event.modelId, model?.name ?? event.newValue);
-            const returned = event.kind === "returned";
-            return (
-              <FlapRow
-                key={event.modelId}
-                href={modelHref(event.modelId)}
-                label={`${providerName(event.provider)} ${returned ? "relisted" : "listed"} ${name} on ${event.at.slice(0, 10)}${model ? `, ${money(model.promptPrice)} in, ${money(model.completionPrice)} out per million` : ""}`}
-                delay={i * 40}
-                columns={[
-                  { text: `${boardDate(event.at)} ${boardTime(event.at)}`, width: 12, sticky: true, tone: "muted" },
-                  { text: name, width: 22, sticky: true },
-                  { text: providerName(event.provider), width: 9, tone: "muted" },
-                  { text: model ? money(model.promptPrice) : "", width: 7, align: "right" },
-                  { text: model ? money(model.completionPrice) : "", width: 7, align: "right" },
-                  { text: returned ? "RETURNED" : "ARRIVED", width: 8, tone: "success" },
-                ]}
-              />
-            );
-          })
-        )}
-      </Board>
+        <aside class="side">
+          <LineChart
+            title="Price index · $ per million input"
+            hint={days.length ? `${days.length} days` : undefined}
+            series={indexSeries}
+            left={days.length ? dayShort(days[0].date) : undefined}
+            right={latestDay ? dayShort(latestDay.date) : undefined}
+            format={(v) => money(String(v / 1_000_000))}
+          />
+          <Section title="Status" action={<More to="/status">History</More>}>
+            {statuses.length === 0 ? <p class="note">No status checks yet.</p> : (
+              <table aria-label="Provider status">
+                <tbody>
+                  {statuses.map((s) => {
+                    const word = statusWord(s.indicator);
+                    return (
+                      <tr key={s.id}>
+                        <td><Link to={providerHref(s.provider)} class="hl">{providerName(s.provider)}</Link></td>
+                        <td class="n"><Pill tone={word.tone} title={s.description}>{word.word}</Pill></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </Section>
+        </aside>
+      </div>
 
-      {/* PRICE BOARD */}
-      <Board
-        label="Price board"
-        hint={windowLabel}
-        action={
-          <span class="flex flex-wrap gap-1.5">
-            <Sign to={query("")} active={!kindFilter && !watchOnly}>All</Sign>
-            {watchlist.length ? <Sign to={watchOnly ? "/" : "/?watch=1"} active={watchOnly}>Watching {watchlist.length}</Sign> : null}
-            <Sign to="/changes?kind=prices">Full record</Sign>
-          </span>
-        }
-      >
-        <ColumnHeads columns={[{ label: "Model", width: 22, sticky: true }, { label: "Provider", width: 9 }, { label: "Was", width: 7, align: "right" }, { label: "Now", width: 7, align: "right" }, { label: "Change", width: 9 }, { label: "Time", width: 6, align: "right" }]} />
-        {lead.stories.length === 0 ? (
-          <p class="px-3 py-4 text-sm text-ink-muted">{watchOnly ? "Nothing moved for the models you watch." : "Quiet. Nothing but small moves."}</p>
-        ) : (
-          lead.stories.map((s, i) => {
-            const leadEvent = s.events.find((e) => e.field === "promptPrice") ?? s.events.find((e) => e.field === "completionPrice") ?? s.events.find((e) => e.field === "contextLength");
-            const isContext = leadEvent?.field === "contextLength";
-            const was = leadEvent ? (isContext ? formatContext(leadEvent.oldValue) : money(leadEvent.oldValue)) : "";
-            const nowValue = leadEvent ? (isContext ? formatContext(leadEvent.newValue) : money(leadEvent.newValue)) : "";
-            const delta = storyDelta(s);
-            const change =
-              s.kind === "delisted" ? { text: "CANCELLED", tone: "danger" as FlapTone }
-              : s.kind === "repointed" ? { text: "REROUTED", tone: "warning" as FlapTone }
-              : delta === null ? { text: "", tone: "muted" as FlapTone }
-              : { text: boardPct(delta), tone: (deltaIsGood(s, delta) ? "success" : "warning") as FlapTone };
-            const name = shortName(s.modelId, names.get(s.modelId));
-            return (
-              <FlapRow
-                key={s.key}
-                href={storyHref(s, keys)}
-                label={`${s.headline}${s.detail ? `. ${s.detail}` : ""}`}
-                delay={i * 40}
-                columns={[
-                  { text: isAlias(s.modelId) ? `${name.slice(0, 16)} ALIAS` : name, width: 22, sticky: true },
-                  { text: providerName(s.provider), width: 9, tone: "muted" },
-                  { text: s.kind === "delisted" ? "" : was, width: 7, align: "right", tone: "muted" },
-                  { text: s.kind === "delisted" ? "" : nowValue, width: 7, align: "right" },
-                  { text: change.text, width: 9, tone: change.tone },
-                  { text: boardWhen(s.at), width: 6, align: "right", tone: "muted" },
-                ]}
-              />
-            );
-          })
-        )}
-      </Board>
-
-      {/* STATUS */}
-      <Board label="Status" hint="from each provider's own status page" action={<Sign to="/status">Full status</Sign>}>
-        <ColumnHeads columns={[{ label: "Provider", width: 11, sticky: true }, { label: "Status", width: 9 }, { label: "Remarks", width: 28 }, { label: "Last 45 days", width: 24 }]} />
-        {statuses.length === 0 ? (
-          <p class="px-3 py-4 text-sm text-ink-muted">No status checks yet.</p>
-        ) : (
-          statuses.map((s, i) => {
-            const spec = statusWord(s.indicator);
-            const days = uptimeDays(s, page.statusEvents.filter((e) => e.provider === s.provider), page.incidents.filter((inc) => inc.provider === s.provider), 45);
-            const remarks = remarkWord(s.indicator, s.description);
-            return (
-              <FlapRow
-                key={s.id}
-                href={`/provider/${encodeURIComponent(s.provider)}`}
-                label={`${providerName(s.provider)}: ${spec.word.toLowerCase()}. ${remarks}`}
-                delay={i * 40}
-                columns={[
-                  { text: providerName(s.provider), width: 11, sticky: true },
-                  { text: spec.word, width: 9, tone: spec.tone },
-                  { text: remarks, width: 28, tone: "muted" },
-                  { text: "", width: 24, render: <UptimeStrip days={days} label={`${providerName(s.provider)} over the last 45 days`} /> },
-                ]}
-              />
-            );
-          })
-        )}
-      </Board>
-
-      {/* THE LOG */}
-      <section class="flex flex-col gap-3" aria-label="The log">
-        <header class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line pb-2">
-          <h2 class="text-sm font-bold uppercase tracking-[0.4em] text-ink">The log <span class="ml-2 font-normal tracking-[0.2em] text-ink-muted">everything, newest first</span></h2>
-          <div class="flex flex-wrap gap-1.5">
-            <Stencil active={!kindFilter} href={query("")}>All</Stencil>
-            {Object.entries(KIND_GROUPS).map(([key, g]) => (
-              <Stencil key={key} active={kindFilter === key} href={query(key)}>{g.label}</Stencil>
-            ))}
-          </div>
-        </header>
-        {record.length === 0 ? (
-          <p class="py-4 text-sm text-ink-muted">Nothing recorded yet.</p>
-        ) : (
-          [...byDay.entries()].map(([day, list]) => (
-            <div key={day}>
-              <LogDay>{dayLabel(day)} <span class="font-normal text-ink-muted">· {plural(list.length, "entry", "entries")}</span></LogDay>
-              <ul>
-                {list.map((s) => {
-                  const divider = !dividerPlaced && lastVisit && s.at < lastVisit;
-                  if (divider) dividerPlaced = true;
-                  return (
-                    <div key={s.key}>
-                      {divider ? <li class="flex items-center gap-2 py-1 text-[11px] uppercase tracking-[0.2em] text-accent"><span class="h-px flex-1 bg-accent/40" />new since your last visit ({ago(lastVisit)})<span class="h-px flex-1 bg-accent/40" /></li> : null}
-                      <StoryLine story={s} href={storyHref(s, keys)} />
-                    </div>
-                  );
-                })}
-              </ul>
+      <div class="two">
+        <Section title="Retiring soon" action={<More to="/retiring">All {leaving.length} notices</More>}>
+          {leaving.length === 0 ? <p class="note">No retirements announced.</p> : (
+            <div class="tw">
+              <table aria-label="Retiring soon">
+                <thead><tr><th>Retires</th><th>Model</th><th>Replacement</th><th class="n">Left</th></tr></thead>
+                <tbody>
+                  {leaving.slice(0, 8).map((d) => {
+                    const left = daysLeft(d.retiresAt);
+                    return (
+                      <tr key={d.key}>
+                        <td class="when">{dayShort(d.retiresAt)}</td>
+                        <td>
+                          {d.href ? <Link to={d.href} class="hl">{d.model}</Link> : d.model}
+                          <span class="who"><Link to={providerHref(d.providerSlug)}>{d.provider}</Link> · {SOURCE_WORD[d.source] ?? d.source}</span>
+                        </td>
+                        <td class="soft small">{d.replacement || "—"}</td>
+                        <td class="n"><Pill tone={left.tone}>{left.text}</Pill></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-          ))
-        )}
-        <div class="flex items-center gap-3 pt-2">
-          <Sign to="/changes">Load older</Sign>
-          <span class="text-xs text-ink-muted">Showing the latest {record.length}. Filters and paging on the full record.</span>
+          )}
+        </Section>
+        <div class="side">
+          <Section title="New this week">
+            {fresh.length === 0 ? <p class="note">Nothing new listed this week.</p> : (
+              <table aria-label="New this week">
+                <tbody>
+                  {fresh.map((s) => {
+                    const m = byId.get(s.modelId);
+                    return (
+                      <tr key={s.key}>
+                        <td class="when">{dayShort(s.at)}</td>
+                        <td><Link to={modelHref(s.modelId)} class="hl">{holder(s.modelId)}</Link><span class="who">{providerName(s.provider)}</span></td>
+                        <td class="n num">{m ? `${money(m.promptPrice)} / ${money(m.completionPrice)}` : ""}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </Section>
+          {latestDay && latestDay.cheapestFrontierId ? (
+            <Section title="Cheapest frontier seat">
+              <p style={{ fontSize: 14 }}>
+                <Link to={modelHref(latestDay.cheapestFrontierId)} class="hl">{holder(latestDay.cheapestFrontierId)}</Link> at {money(String(num(latestDay.cheapestFrontierIn) / 1_000_000))} per million input, inside the top-{latestDay.frontierN} capability basket. <Link to="/models" class="acc">Price vs capability →</Link>
+              </p>
+            </Section>
+          ) : null}
         </div>
-      </section>
+      </div>
 
-      <div class="grid gap-8 border-t border-line pt-8 text-sm text-ink-muted md:grid-cols-3">
-        <div class="flex flex-col gap-2">
-          <h3 class="text-[11px] font-semibold uppercase tracking-[0.3em] text-ink">How this works</h3>
-          <p>Every half hour, the public price list for every model is compared with the one from half an hour ago. Anything that moved is written down with the time, and nothing is ever deleted.</p>
-          <p>Prices are also checked against the providers' own lists. Retirement dates come from the providers' own notices.</p>
-          <Link to="/about" class="text-accent hover:underline">More about the method</Link>
-        </div>
-        <div class="flex flex-col gap-2">
-          <h3 class="text-[11px] font-semibold uppercase tracking-[0.3em] text-ink">Sources</h3>
-          <p>Model listings and prices from OpenRouter and each host it routes to. Cross-checks from models.dev and LiteLLM. Retirement notices from OpenAI, Anthropic and Cohere. Status from each provider's status page.</p>
-        </div>
-        <div class="flex flex-col gap-2">
-          <h3 class="text-[11px] font-semibold uppercase tracking-[0.3em] text-ink">Get the data</h3>
-          <ul class="flex flex-col gap-1">
-            <li><a href="/feed.xml" class="text-accent hover:underline">RSS feed</a> of every change, filterable</li>
-            <li><Link to="/api" class="text-accent hover:underline">JSON API and badges</Link></li>
-            <li><a href="/export/changes.csv" class="text-accent hover:underline">Download the latest changes as CSV</a></li>
-          </ul>
-        </div>
+      <div class="records" aria-label="Records">
+        {unchanged ? <Rec value={unchanged.days.toLocaleString()} label="days without a price change" holder={holder(unchanged.modelId)} href={modelHref(unchanged.modelId)} /> : null}
+        {cutIn ? <Rec value={`−${Math.round(Math.abs(Number(cutIn.value)))}%`} label="largest input price cut" holder={holder(cutIn.modelId)} href={modelHref(cutIn.modelId)} /> : null}
+        {ctx ? <Rec value={formatContext(ctx.value)} label="largest context increase" holder={holder(ctx.modelId)} href={modelHref(ctx.modelId)} /> : null}
+        {shortest ? <Rec value={Number(shortest.value).toLocaleString()} label={`${Number(shortest.value) === 1 ? "day" : "days"} listed, the shortest ever`} holder={holder(shortest.modelId)} href={modelHref(shortest.modelId)} /> : null}
       </div>
     </div>
   );

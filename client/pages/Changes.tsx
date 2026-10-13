@@ -1,5 +1,5 @@
 /**
- * The full log with filters in the URL, so every view is a link someone can send.
+ * Every change recorded, with the filters in the URL so every view is a link someone can send.
  */
 import { useMemo } from "preact/hooks";
 import { useNavigate, useQuery } from "@spacefast/zero/client";
@@ -7,8 +7,7 @@ import { useNavigate, useQuery } from "@spacefast/zero/client";
 import { providerName } from "../../shared/providers";
 import type { Story } from "../../shared/stories";
 import type { ArchiveEvent, HostEvent, LifecycleEvent, ModelRow, Page, SourceEventRow } from "../../shared/types";
-import { Sign } from "../components/Flap";
-import { BoardEmpty, BoardSkeleton, LogDay, LogSection, Marquee, SignSelect, Stencil, StoryLine } from "../components/Log";
+import { Chip, DayRow, Empty, PageHead, Section, Select, Skeleton, StoryRow, StoryTable } from "../components/Wire";
 import { KIND_GROUPS, assembleStories, keyIndex, kindInGroup, nameIndex, storyHref } from "../lib/stories";
 import { dayLabel, plural, usePageTitle, useSearchParams } from "../lib/util";
 import { matchesWatch, useWatchlist } from "../lib/watch";
@@ -41,7 +40,7 @@ function usePages(provider: string, pages: number): { events: ArchiveEvent[]; la
 }
 
 export function ChangesPage() {
-  usePageTitle("The log");
+  usePageTitle("Changes");
   const params = useSearchParams();
   const navigate = useNavigate();
   const kind = params.get("kind") ?? "";
@@ -90,52 +89,54 @@ export function ChangesPage() {
   const loading = events.length === 0 && loaded === 0;
 
   return (
-    <div class="flex flex-col gap-8">
-      <Marquee title="The log" action={<><Sign href="/feed.xml">RSS</Sign><Sign href="/export/changes.csv">CSV</Sign></>}>
+    <div class="stack">
+      <PageHead title="Changes" action={<><Chip href="/feed.xml">Feed</Chip><Chip href="/export/changes.csv">CSV</Chip></>}>
         Everything recorded, newest first. Small price wobbles are folded into one line per model per day; every view here is a link you can send.
-      </Marquee>
-      <LogSection
+      </PageHead>
+      <Section
         title="Entries"
         hint={stories.length ? `${plural(stories.length, "entry", "entries")} loaded` : undefined}
         action={
           <>
-            <Stencil active={!kind} href={withParam(params, "kind", "")}>All</Stencil>
+            <Chip active={!kind} to={withParam(params, "kind", "")}>All</Chip>
             {Object.entries(KIND_GROUPS).map(([key, g]) => (
-              <Stencil key={key} active={kind === key} href={withParam(params, "kind", key)}>{g.label}</Stencil>
+              <Chip key={key} active={kind === key} to={withParam(params, "kind", key)}>{g.label}</Chip>
             ))}
-            <Stencil active={confirmedOnly} href={withParam(params, "confirmed", confirmedOnly ? "" : "1")} title="Only moves another price list also recorded">Confirmed</Stencil>
-            {watchlist.length ? <Stencil active={watchOnly} href={withParam(params, "watch", watchOnly ? "" : "1")}>Watching {watchlist.length}</Stencil> : null}
-            <SignSelect value={provider} onChange={(v) => navigate(withParam(params, "provider", v))} label="Filter by provider">
+            <Chip active={confirmedOnly} to={withParam(params, "confirmed", confirmedOnly ? "" : "1")} title="Only moves another price list also recorded">Confirmed</Chip>
+            {watchlist.length ? <Chip active={watchOnly} to={withParam(params, "watch", watchOnly ? "" : "1")}>Watching {watchlist.length}</Chip> : null}
+            <Select value={provider} onChange={(v) => navigate(withParam(params, "provider", v))} label="Filter by provider">
               <option value="">Every provider</option>
               {providers.map((p) => <option key={p} value={p}>{providerName(p)}</option>)}
-            </SignSelect>
+            </Select>
           </>
         }
       >
         {loading ? (
-          <BoardSkeleton rows={8} size="sm" />
+          <Skeleton rows={8} />
         ) : stories.length === 0 ? (
-          <BoardEmpty>{last && !last.isDone ? "Nothing matches in what is loaded. Load older, or loosen the filters." : "Nothing matches. Loosen the filters."}</BoardEmpty>
+          <Empty>{last && !last.isDone ? "Nothing matches in what is loaded. Load older, or loosen the filters." : "Nothing matches. Loosen the filters."}</Empty>
         ) : (
-          [...byDay.entries()].map(([day, list]) => (
-            <div key={day}>
-              <LogDay>{dayLabel(day)} <span class="font-normal text-ink-muted">· {plural(list.length, "entry", "entries")}</span></LogDay>
-              <ul>{list.map((s) => <StoryLine key={s.key} story={s} href={storyHref(s, keys)} showMore />)}</ul>
-            </div>
-          ))
+          <StoryTable label="Changes">
+            {[...byDay.entries()].map(([day, list]) => (
+              <>
+                <DayRow key={`day-${day}`}>{dayLabel(day)} <span class="soft" style={{ fontWeight: 400 }}>· {plural(list.length, "entry", "entries")}</span></DayRow>
+                {list.map((s) => <StoryRow key={s.key} story={s} href={storyHref(s, keys)} showMore />)}
+              </>
+            ))}
+          </StoryTable>
         )}
-        <div class="flex flex-wrap items-center justify-between gap-3 pt-2">
-          <span class="text-xs text-ink-muted">{oldest ? `Loaded back to ${dayLabel(oldest)}.` : ""}</span>
-          <span class="flex gap-1.5">
-            {pages > 1 ? <Sign to={withParam(params, "page", String(pages - 1))}>Fewer</Sign> : null}
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 12, paddingTop: 12 }}>
+          <span class="small soft">{oldest ? `Loaded back to ${dayLabel(oldest)}.` : ""}</span>
+          <span class="chips">
+            {pages > 1 ? <Chip to={withParam(params, "page", String(pages - 1))}>Fewer</Chip> : null}
             {last && !last.isDone ? (
-              <Sign onClick={() => navigate(withParam(params, "page", String(pages + 1)))} active>Load older</Sign>
+              <Chip onClick={() => navigate(withParam(params, "page", String(pages + 1)))} active>Load older</Chip>
             ) : (
-              <span class="text-[11px] uppercase tracking-[0.2em] text-ink-muted">That is the whole record</span>
+              <span class="small soft">That is the whole record</span>
             )}
           </span>
         </div>
-      </LogSection>
+      </Section>
     </div>
   );
 }

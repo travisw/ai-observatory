@@ -5,10 +5,9 @@ import { useState } from "preact/hooks";
 import { Link, useQuery } from "@spacefast/zero/client";
 
 import type { DailyRow, ModelRow } from "../../shared/types";
-import { Sign } from "../components/Flap";
-import { BoardEmpty, LogSection, Marquee, PageSkeleton, Readout, Stencil } from "../components/Log";
 import { StepChart, StepTable, type StepSeries } from "../components/StepChart";
-import { boardPct, shortName } from "../lib/board";
+import { Chip, Empty, PageHead, Section, Skeleton, Stat } from "../components/Wire";
+import { pct, shortName } from "../lib/text";
 import { isLoading, modelHref, pctChange, usePageTitle } from "../lib/util";
 
 function series(rows: DailyRow[], key: keyof DailyRow, label: string): StepSeries {
@@ -24,7 +23,7 @@ export function PriceIndexPage() {
   const daily = useQuery<DailyRow[]>("dailyStats", 365);
   const models = useQuery<ModelRow[]>("activeModels");
   const [tab, setTab] = useState("chart");
-  if (isLoading(daily) && isLoading(models)) return <PageSkeleton />;
+  if (isLoading(daily) && isLoading(models)) return <Skeleton />;
   const rows = (daily ?? []).slice().sort((a, b) => a.date.localeCompare(b.date));
   const latest = rows[rows.length - 1];
   const monthAgo = rows.find((r) => Date.parse(r.date) >= Date.parse(latest?.date ?? "") - 30 * 86_400_000);
@@ -36,52 +35,52 @@ export function PriceIndexPage() {
   ].filter((s) => s.points.length > 0);
   const cheapestFrontier = latest?.cheapestFrontierId ? (models ?? []).find((m) => m.modelId === latest.cheapestFrontierId) : undefined;
   const change = (now: string, then?: string) => {
-    const pct = then ? pctChange(then, now) : null;
-    return pct !== null && Math.abs(pct) >= 0.5 ? `${boardPct(pct)} over 30 days` : "flat over 30 days";
+    const delta = then ? pctChange(then, now) : null;
+    return delta !== null && Math.abs(delta) >= 0.5 ? `${pct(delta)} over 30 days` : "flat over 30 days";
   };
   const dollars = (v: string) => `$${Number(v).toFixed(2)}`;
 
   return (
-    <div class="flex flex-col gap-8">
-      <Marquee title="Token price index" action={<Sign href="/api/index.json">JSON, daily</Sign>}>
+    <div class="stack">
+      <PageHead title="Token price index" action={<Chip href="/api/index.json">JSON, daily</Chip>}>
         What a million input tokens costs, per day, for three baskets: the fifteen most capable models, the next thirty, and everything else with a published capability score. Each basket's number is its median price, so one outlier cannot move it. Baskets are rebuilt every day from the Artificial Analysis intelligence index that OpenRouter publishes; rolling aliases and free models are left out.
-      </Marquee>
+      </PageHead>
 
       {!latest ? (
-        <BoardEmpty>No daily figures yet. The first point lands after the next daily run.</BoardEmpty>
+        <Empty>No daily figures yet. The first point lands after the next daily run.</Empty>
       ) : (
         <>
-          <div class="grid grid-cols-2 gap-x-6 gap-y-4 lg:grid-cols-4">
-            <Readout label={`Frontier · ${latest.frontierN} models`} value={dollars(latest.frontierIn)} width={6} sub={change(latest.frontierIn, monthAgo?.frontierIn)} delay={0} />
-            <Readout label={`Mid-tier · ${latest.midN} models`} value={dollars(latest.midIn)} width={6} sub={change(latest.midIn, monthAgo?.midIn)} delay={40} />
-            <Readout label={`Budget · ${latest.budgetN} models`} value={dollars(latest.budgetIn)} width={6} sub={change(latest.budgetIn, monthAgo?.budgetIn)} delay={80} />
-            <Readout label={`All models · ${latest.listed} listed`} value={dollars(latest.medianIn)} width={6} sub={change(latest.medianIn, monthAgo?.medianIn)} delay={120} />
+          <div class="stats">
+            <Stat value={dollars(latest.frontierIn)} label={`Frontier · ${latest.frontierN} models · ${change(latest.frontierIn, monthAgo?.frontierIn)}`} />
+            <Stat value={dollars(latest.midIn)} label={`Mid-tier · ${latest.midN} models · ${change(latest.midIn, monthAgo?.midIn)}`} />
+            <Stat value={dollars(latest.budgetIn)} label={`Budget · ${latest.budgetN} models · ${change(latest.budgetIn, monthAgo?.budgetIn)}`} />
+            <Stat value={dollars(latest.medianIn)} label={`All models · ${latest.listed} listed · ${change(latest.medianIn, monthAgo?.medianIn)}`} />
           </div>
           {cheapestFrontier ? (
-            <p class="text-sm text-ink-muted">
-              Cheapest way into the frontier basket today: <Link to={modelHref(cheapestFrontier.modelId)} class="text-accent hover:underline">{shortName(cheapestFrontier.modelId, cheapestFrontier.name)}</Link> at ${Number(latest.cheapestFrontierIn).toFixed(2)} per million input tokens.
+            <p class="note">
+              Cheapest way into the frontier basket today: <Link to={modelHref(cheapestFrontier.modelId)} class="acc hl">{shortName(cheapestFrontier.modelId, cheapestFrontier.name)}</Link> at ${Number(latest.cheapestFrontierIn).toFixed(2)} per million input tokens.
             </p>
           ) : null}
-          <LogSection
+          <Section
             title="Input price by basket"
             hint="$ per million tokens, daily"
-            action={<><Stencil active={tab === "chart"} onClick={() => setTab("chart")}>Chart</Stencil><Stencil active={tab === "table"} onClick={() => setTab("table")}>Table</Stencil></>}
+            action={<><Chip active={tab === "chart"} onClick={() => setTab("chart")}>Chart</Chip><Chip active={tab === "table"} onClick={() => setTab("table")}>Table</Chip></>}
           >
             {rows.length < 2 ? (
-              <BoardEmpty>One day on record so far. The chart draws itself as days accumulate.</BoardEmpty>
+              <Empty>One day on record so far. The chart draws itself as days accumulate.</Empty>
             ) : tab === "chart" ? (
-              <StepChart series={chart} from={Date.parse(`${rows[0].date}T00:00:00Z`)} height={300} />
+              <div class="box"><StepChart series={chart} from={Date.parse(`${rows[0].date}T00:00:00Z`)} height={300} /></div>
             ) : (
               <StepTable series={chart} />
             )}
-          </LogSection>
-          <LogSection title="Catalogue size" hint="models listed per day">
+          </Section>
+          <Section title="Catalogue size" hint="models listed per day">
             {rows.length < 2 ? (
-              <BoardEmpty>One day on record so far</BoardEmpty>
+              <Empty>One day on record so far.</Empty>
             ) : (
-              <StepChart series={[series(rows, "listed", "models listed"), series(rows, "free", "free models")]} from={Date.parse(`${rows[0].date}T00:00:00Z`)} height={180} formatValue={(v) => String(Math.round(v))} />
+              <div class="box"><StepChart series={[series(rows, "listed", "models listed"), series(rows, "free", "free models")]} from={Date.parse(`${rows[0].date}T00:00:00Z`)} height={180} formatValue={(v) => String(Math.round(v))} /></div>
             )}
-          </LogSection>
+          </Section>
         </>
       )}
     </div>

@@ -1,18 +1,18 @@
 /**
- * Pulse: where developer attention is going, snapshotted once a day, kept as a logbook.
+ * Pulse: where developer attention is going, snapshotted once a day, kept as a record.
  */
 import type { ComponentChildren } from "preact";
 import { useQuery } from "@spacefast/zero/client";
 
 import type { PkgRow, PollRow, PypiRow, RepoRow, TrendRow } from "../../shared/types";
-import { BoardEmpty, LogLine, LogSection, Marquee } from "../components/Log";
-import { boardDate, boardTime } from "../lib/board";
+import { Empty, PageHead, Pill, Section } from "../components/Wire";
+import { dayShort, hm } from "../lib/text";
 import { dayLabel, usePageTitle } from "../lib/util";
 
-function List<T extends { id: string }>(props: { rows: T[] | undefined; render: (r: T) => ComponentChildren; empty?: string }) {
+function Table<T extends { id: string }>(props: { rows: T[] | undefined; render: (r: T) => ComponentChildren; empty?: string; label: string }) {
   const rows = props.rows ?? [];
-  if (rows.length === 0) return <BoardEmpty>{props.empty ?? "No snapshot yet. The daily check has not run."}</BoardEmpty>;
-  return <ul>{rows.map((r) => props.render(r))}</ul>;
+  if (rows.length === 0) return <Empty>{props.empty ?? "No snapshot yet. The daily check has not run."}</Empty>;
+  return <div class="tw"><table aria-label={props.label}><tbody>{rows.map((r) => props.render(r))}</tbody></table></div>;
 }
 
 export function PulsePage() {
@@ -25,43 +25,48 @@ export function PulsePage() {
   const latestDay = trending?.[0]?.at;
 
   return (
-    <div class="flex flex-col gap-8">
-      <Marquee title="Pulse">
+    <div class="stack">
+      <PageHead title="Pulse">
         Where attention is going, snapshotted once a day: what people download, star and look at.{latestDay ? ` Last snapshot ${dayLabel(latestDay).toLowerCase()}.` : ""}
-      </Marquee>
-      <div class="grid gap-8 md:grid-cols-2">
-        <LogSection title="Hugging Face trending" hint="open-weights models people are looking at">
-          <List rows={trending} render={(r) => (
-            <LogLine key={r.id} left={`#${r.rank}`} right={<span class="text-ink-muted">{Number(r.likes).toLocaleString()} LIKES</span>}>
-              <a href={`https://huggingface.co/${r.modelId}`} target="_blank" rel="noopener" class="font-mono text-xs hover:text-accent">{r.modelId}</a>
-            </LogLine>
+      </PageHead>
+      <div class="two" style={{ gridTemplateColumns: "1fr 1fr", padding: 0 }}>
+        <Section title="Hugging Face trending" hint="open-weights models people are looking at">
+          <Table label="Hugging Face trending" rows={trending} render={(r) => (
+            <tr key={r.id}>
+              <td class="when">#{r.rank}</td>
+              <td><a href={`https://huggingface.co/${r.modelId}`} target="_blank" rel="noopener" class="hl mono small">{r.modelId}</a></td>
+              <td class="n soft">{Number(r.likes).toLocaleString()} likes</td>
+            </tr>
           )} />
-        </LogSection>
-        <LogSection title="npm downloads" hint="client libraries, last week">
-          <List rows={packages} render={(r) => (
-            <LogLine key={r.id} left="NPM" right={<span class="text-ink">{Number(r.downloads).toLocaleString()}</span>}><span class="font-mono text-xs">{r.pkg}</span></LogLine>
+        </Section>
+        <Section title="npm downloads" hint="client libraries, last week">
+          <Table label="npm downloads" rows={packages} render={(r) => (
+            <tr key={r.id}><td class="mono small">{r.pkg}</td><td class="n">{Number(r.downloads).toLocaleString()}</td></tr>
           )} />
-        </LogSection>
-        <LogSection title="PyPI downloads" hint="client libraries, last week">
-          <List rows={pypi} render={(r) => (
-            <LogLine key={r.id} left="PYPI" right={<span class="text-ink">{Number(r.lastWeek).toLocaleString()}</span>}><span class="font-mono text-xs">{r.pkg}</span></LogLine>
+        </Section>
+        <Section title="PyPI downloads" hint="client libraries, last week">
+          <Table label="PyPI downloads" rows={pypi} render={(r) => (
+            <tr key={r.id}><td class="mono small">{r.pkg}</td><td class="n">{Number(r.lastWeek).toLocaleString()}</td></tr>
           )} />
-        </LogSection>
-        <LogSection title="GitHub" hint="stars · open issues">
-          <List rows={repos} render={(r) => (
-            <LogLine key={r.id} left="REPO" right={<span><span class="text-accent">{Number(r.stars).toLocaleString()} ★</span> <span class="text-ink-muted">{r.openIssues} OPEN</span></span>}>
-              <a href={`https://github.com/${r.repo}`} target="_blank" rel="noopener" class="font-mono text-xs hover:text-accent">{r.repo}</a>
-            </LogLine>
+        </Section>
+        <Section title="GitHub" hint="stars · open issues">
+          <Table label="GitHub repositories" rows={repos} render={(r) => (
+            <tr key={r.id}>
+              <td><a href={`https://github.com/${r.repo}`} target="_blank" rel="noopener" class="hl mono small">{r.repo}</a></td>
+              <td class="n"><span class="acc">{Number(r.stars).toLocaleString()} ★</span> <span class="soft">{r.openIssues} open</span></td>
+            </tr>
           )} />
-        </LogSection>
+        </Section>
       </div>
-      <LogSection title="Collector log" hint="each check, newest first; gaps in the record show up here">
-        <List rows={polls} render={(r) => (
-          <LogLine key={r.id} left={`${boardDate(r.at)} ${boardTime(r.at)}`} right={<span class={r.ok ? "text-success" : "text-danger"}>{r.ok ? "OK" : "FAILED"}</span>}>
-            <span class="mr-2 text-[10px] uppercase tracking-[0.2em] text-ink-muted">{r.source}</span>{r.note}
-          </LogLine>
+      <Section title="Collector record" hint="each check, newest first; gaps in the record show up here">
+        <Table label="Collector record" rows={polls} render={(r) => (
+          <tr key={r.id}>
+            <td class="when">{dayShort(r.at)} {hm(r.at)}</td>
+            <td><span class="tag" style={{ marginLeft: 0, marginRight: 8 }}>{r.source}</span>{r.note}</td>
+            <td class="n"><Pill tone={r.ok ? "ok" : "bad"}>{r.ok ? "ok" : "failed"}</Pill></td>
+          </tr>
         )} />
-      </LogSection>
+      </Section>
     </div>
   );
 }

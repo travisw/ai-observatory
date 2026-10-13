@@ -1,23 +1,21 @@
 /**
- * One model's flight details: the name on the board, the numbers now, the price as a step
- * chart, who serves it, what the other lists say, its notices, and every change ever recorded.
+ * One model: the name, the numbers now, the price as a step chart, who serves it, what the
+ * other lists say, its notices, and every change ever recorded.
  */
 import { useMemo, useState } from "preact/hooks";
 import { Link, useNavigate, useParams, useQuery } from "@spacefast/zero/client";
-import { CodeBlock } from "@spacefast/zero/kit";
 
 import { formatContext, money, parseTiers } from "../../shared/model";
 import { isAlias, modelName, providerName } from "../../shared/providers";
 import { SOURCE_LABEL, SOURCE_URL, canonicalKey } from "../../shared/sources";
 import type { Story } from "../../shared/stories";
 import type { ArchiveEvent, LifecycleRow, ModelPageData, ModelRow } from "../../shared/types";
-import { Board, ColumnHeads, FlapRow, FlapText, Sign, type FlapTone } from "../components/Flap";
-import { BoardEmpty, LogLine, LogSection, PageSkeleton, Plaque, Readout, Stencil, StoryLine } from "../components/Log";
 import { StepChart, StepTable, type StepSeries } from "../components/StepChart";
-import { boardDate, boardPct, shortName } from "../lib/board";
+import { Chip, Empty, Fig, More, Pill, Section, Skeleton, StoryRow, StoryTable } from "../components/Wire";
 import { sourceStepSeries, stepSeries } from "../lib/series";
-import { assembleStories, keyIndex, storyHref } from "../lib/stories";
-import { DAY, ago, compareHref, copyText, countdown, daysUntil, isLoading, longDate, modelHref, pctChange, plural, signedPct, usePageTitle, useSearchParams } from "../lib/util";
+import { assembleStories, keyIndex } from "../lib/stories";
+import { dayShort, dayYear, pct, shortName, type PillTone } from "../lib/text";
+import { DAY, ago, compareHref, copyText, countdown, daysUntil, isLoading, longDate, modelHref, pctChange, plural, providerHref, signedPct, usePageTitle, useSearchParams } from "../lib/util";
 import { useWatchlist } from "../lib/watch";
 
 const RANGES: { key: string; label: string; days: number }[] = [
@@ -36,21 +34,21 @@ function firstValue(events: ArchiveEvent[], field: string, current: string): str
 function noticeLine(row: LifecycleRow, tracked: Map<string, string>): preact.ComponentChildren {
   const replacementId = row.replacement ? tracked.get(canonicalKey(row.provider, row.replacement)) : undefined;
   const parts: preact.ComponentChildren[] = [];
-  if (row.state === "retired") parts.push(<span class="text-danger">Retired{row.retiresAt ? ` ${longDate(row.retiresAt)}` : ""}</span>);
-  else if (row.state === "deprecated") parts.push(<span class="text-warning">Deprecated{row.deprecatedAt ? ` ${longDate(row.deprecatedAt)}` : ""}</span>);
-  else parts.push(<span class="text-success">Active</span>);
+  if (row.state === "retired") parts.push(<span class="rise">Retired{row.retiresAt ? ` ${longDate(row.retiresAt)}` : ""}</span>);
+  else if (row.state === "deprecated") parts.push(<span class="warn">Deprecated{row.deprecatedAt ? ` ${longDate(row.deprecatedAt)}` : ""}</span>);
+  else parts.push(<span class="cut">Active</span>);
   if (row.state !== "retired" && row.retiresAt) parts.push(<span>{row.retiresNote === "not sooner than" ? "supported until at least" : "retires"} {longDate(row.retiresAt)} ({countdown(row.retiresAt)})</span>);
   if (row.state !== "retired" && !row.retiresAt && row.state === "deprecated") parts.push(<span>retirement date to be announced</span>);
-  if (row.replacement) parts.push(<span>replacement: {replacementId ? <Link to={modelHref(replacementId)} class="text-accent hover:underline">{modelName(replacementId)}</Link> : <span class="font-mono">{row.replacement}</span>}</span>);
+  if (row.replacement) parts.push(<span>replacement: {replacementId ? <Link to={modelHref(replacementId)} class="acc hl">{modelName(replacementId)}</Link> : <span class="mono">{row.replacement}</span>}</span>);
   return parts.map((p, i) => <span key={i}>{i ? " · " : ""}{p}</span>);
 }
 
-function CopySign(props: { text: string; label: string }) {
+function CopyChip(props: { text: string; label: string }) {
   const [done, setDone] = useState(false);
   return (
-    <Sign onClick={() => copyText(props.text).then((ok) => { setDone(ok); setTimeout(() => setDone(false), 1500); })} ariaLabel={`Copy ${props.text}`}>
+    <Chip onClick={() => copyText(props.text).then((ok) => { setDone(ok); setTimeout(() => setDone(false), 1500); })} ariaLabel={`Copy ${props.text}`}>
       {done ? "Copied" : props.label}
-    </Sign>
+    </Chip>
   );
 }
 
@@ -81,13 +79,13 @@ export function ModelPage() {
 
   if (!loading && !model) {
     return (
-      <div class="flex flex-col gap-4">
-        <FlapText text="UNKNOWN MODEL" width={13} size="lg" tone="danger" />
-        <p class="text-sm text-ink-muted">{modelId} has never been seen. <Link to="/models" class="text-accent hover:underline">Browse the models</Link>.</p>
+      <div class="stack">
+        <h1>Unknown model</h1>
+        <p class="deck">{modelId} has never been seen. <Link to="/models" class="acc">Browse the models</Link>.</p>
       </div>
     );
   }
-  if (!model) return <PageSkeleton />;
+  if (!model) return <Skeleton rows={10} />;
 
   const watching = watchlist.includes(model.modelId);
   const alias = isAlias(model.modelId);
@@ -97,13 +95,13 @@ export function ModelPage() {
   const expiring = model.expirationDate && daysUntil(model.expirationDate) >= -1 ? model.expirationDate : "";
   const targetId = model.aliasTarget ? (tracked.get(canonicalKey(model.provider, model.aliasTarget)) ?? model.aliasTarget) : "";
 
-  const status: { word: string; tone: FlapTone } =
-    !model.active ? { word: "CANCELLED", tone: "danger" }
-    : retired ? { word: "DEPARTED", tone: "danger" }
-    : retiring ? (daysUntil(retiring.retiresAt) <= 30 ? { word: "FINAL CALL", tone: "warning" } : { word: "BOARDING", tone: "success" })
-    : expiring ? (daysUntil(expiring) <= 30 ? { word: "FINAL CALL", tone: "warning" } : { word: "BOARDING", tone: "success" })
-    : alias && model.aliasTarget ? { word: "REROUTED", tone: "warning" }
-    : { word: "LISTED", tone: "success" };
+  const status: { word: string; tone: PillTone } =
+    !model.active ? { word: "removed", tone: "bad" }
+    : retired ? { word: "retired", tone: "off" }
+    : retiring ? (daysUntil(retiring.retiresAt) <= 30 ? { word: `retiring ${countdown(retiring.retiresAt)}`, tone: "soon" } : { word: "retiring", tone: "warn" })
+    : expiring ? (daysUntil(expiring) <= 30 ? { word: `expires ${countdown(expiring)}`, tone: "soon" } : { word: "expiring", tone: "warn" })
+    : alias && model.aliasTarget ? { word: "rolling alias", tone: "warn" }
+    : { word: "listed", tone: "ok" };
 
   const inputSeries = stepSeries(events, "promptPrice", model.promptPrice, model.firstSeenAt);
   const outputSeries = stepSeries(events, "completionPrice", model.completionPrice, model.firstSeenAt);
@@ -133,70 +131,74 @@ export function ModelPage() {
   const listings = data.listings.slice().sort((a, b) => a.source.localeCompare(b.source));
   const badgeMarkdown = `![input price](https://ai-observatory.view.fast/badge.svg?model=${model.modelId}&metric=input)`;
   const name = shortName(model.modelId, model.name);
-  const sinceWord = (pct: number | null) => (pct !== null && pct !== 0 ? `${signedPct(pct)} since listed` : "unchanged since listed");
+  const sinceWord = (p: number | null) => (p !== null && p !== 0 ? `${signedPct(p)} since listed` : "unchanged since listed");
+  const toneOf = (p: number | null): "cut" | "rise" | "" => (p === null || p === 0 ? "" : p < 0 ? "cut" : "rise");
 
   return (
-    <div class="flex flex-col gap-8">
-      <Board label={providerName(model.provider)} hint={alias ? "rolling alias" : model.modality || undefined} action={<Sign to={`/provider/${encodeURIComponent(model.provider.replace(/^~/, ""))}`}>All {providerName(model.provider)} models</Sign>}>
-        <div class="flex flex-col gap-4 px-3 py-4">
-          <div class="flex flex-wrap items-center justify-between gap-4">
-            <h1 class="min-w-0">
-              <FlapText text={name} width={Math.min(30, Math.max(8, name.length))} size="lg" />
-            </h1>
-            <FlapText text={status.word} width={10} size="lg" tone={status.tone} delay={200} />
-          </div>
-          <div class="flex flex-wrap items-center gap-1.5">
-            <span class="rounded-sm border border-line bg-canvas px-2 py-1 font-mono text-xs text-ink-muted">{model.modelId}</span>
-            <CopySign text={model.modelId} label="Copy id" />
-            <Sign onClick={() => (watching ? removeWatch(model.modelId) : addWatch(model.modelId))} active={watching} ariaLabel={watching ? "Stop watching" : "Watch this model"}>{watching ? "Watching" : "Watch"}</Sign>
-            <Sign onClick={() => navigate(compareHref([model.modelId]))}>Compare</Sign>
-            <Sign href={`/og/model.png?id=${encodeURIComponent(model.modelId)}`} title="A shareable card for this model">Share card</Sign>
-            <Sign href={`/api/model.json?id=${encodeURIComponent(model.modelId)}`}>JSON</Sign>
-            <Sign href={`/feed.xml?model=${encodeURIComponent(model.modelId)}`}>RSS</Sign>
-          </div>
-          <p class="text-xs uppercase tracking-[0.2em] text-ink-muted">
-            listed {boardDate(model.firstSeenAt)} {model.firstSeenAt.slice(0, 4)} · last seen {ago(model.lastSeenAt)}
-            {model.knowledgeCutoff ? ` · knows the world to ${longDate(model.knowledgeCutoff)}` : ""}
-            {model.reasoning ? ` · reasoning${model.reasoning === "mandatory" ? " always on" : ""}` : ""}
-            {model.inputModalities && model.inputModalities !== "text" ? ` · ${model.inputModalities.split(",").join(" + ")} in` : ""}
-            {model.huggingFaceId ? <> · <a href={`https://huggingface.co/${model.huggingFaceId}`} class="text-accent hover:underline" target="_blank" rel="noopener">open weights</a></> : null}
-          </p>
-          <div class="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 lg:grid-cols-5">
-            <Readout label="In $/M" value={money(model.promptPrice) || "-"} width={7} size="md" sub={sinceWord(inputSinceListed)} tag={atLow ? "Lowest ever" : undefined} delay={0} />
-            <Readout label="Out $/M" value={money(model.completionPrice) || "-"} width={7} size="md" sub={sinceWord(outputSinceListed)} delay={40} />
-            <Readout label="Cache $/M" value={model.cacheReadPrice ? money(model.cacheReadPrice) : "-"} width={7} size="md" sub={model.cacheWritePrice ? `write ${money(model.cacheWritePrice)}` : undefined} delay={80} />
-            <Readout label="Context" value={formatContext(model.contextLength)} width={6} size="md" sub={tiers.length ? `pricier above ${formatContext(String(tiers[0].minPromptTokens))}` : undefined} delay={120} />
-            <Readout label="Max out" value={formatContext(model.maxCompletion)} width={6} size="md" sub={`${model.changeCount || "0"} changes recorded`} delay={160} />
-          </div>
-          {alias && model.aliasTarget ? (
-            <p class="text-sm text-ink">This name always points at the newest model in its family. Right now that is <Link to={modelHref(targetId)} class="text-accent hover:underline">{modelName(targetId, names.get(targetId))}</Link>.</p>
-          ) : null}
-          {model.description ? <p class="max-w-3xl text-sm leading-relaxed text-ink-muted">{model.description.length > 420 ? `${model.description.slice(0, 420)}…` : model.description}</p> : null}
-          {tiers.length ? <p class="text-sm text-ink-muted">Long prompts cost more: {tiers.map((t) => `above ${formatContext(String(t.minPromptTokens))} tokens, ${money(t.prompt)} in · ${money(t.completion)} out`).join("; ")}.</p> : null}
+    <div class="stack">
+      <div>
+        <span class="kicker"><Link to={providerHref(model.provider)} class="hl">{providerName(model.provider)}</Link>{alias ? " · rolling alias" : model.modality ? ` · ${model.modality}` : ""}</span>
+        <h1 style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px 14px" }}>
+          <span>{name}</span>
+          <Pill tone={status.tone}>{status.word}</Pill>
+        </h1>
+        <div class="fig">
+          <Fig label="Input / M" value={money(model.promptPrice) || "–"} tone={toneOf(inputSinceListed)} />
+          <Fig label="Output / M" value={money(model.completionPrice) || "–"} tone={toneOf(outputSinceListed)} />
+          <Fig label="Cache read / M" value={model.cacheReadPrice ? money(model.cacheReadPrice) : "–"} />
+          <Fig label="Context" value={formatContext(model.contextLength)} />
+          <Fig label="Max output" value={formatContext(model.maxCompletion)} />
+          <Fig label="Changes" value={model.changeCount || "0"} />
         </div>
-      </Board>
+        <p class="note">
+          Input {sinceWord(inputSinceListed)}{atLow ? ", at its lowest ever" : ""} · output {sinceWord(outputSinceListed)}
+          {model.cacheWritePrice ? ` · cache write ${money(model.cacheWritePrice)}` : ""}
+          {tiers.length ? ` · pricier above ${formatContext(String(tiers[0].minPromptTokens))}` : ""}
+        </p>
+        <div class="chips" style={{ margin: "10px 0" }}>
+          <span class="mono small soft" style={{ marginRight: 4 }}>{model.modelId}</span>
+          <CopyChip text={model.modelId} label="Copy id" />
+          <Chip onClick={() => (watching ? removeWatch(model.modelId) : addWatch(model.modelId))} active={watching} ariaLabel={watching ? "Stop watching" : "Watch this model"}>{watching ? "Watching" : "Watch"}</Chip>
+          <Chip onClick={() => navigate(compareHref([model.modelId]))}>Compare</Chip>
+          <Chip href={`/og/model.png?id=${encodeURIComponent(model.modelId)}`} title="A shareable card for this model">Share card</Chip>
+          <Chip href={`/api/model.json?id=${encodeURIComponent(model.modelId)}`}>JSON</Chip>
+          <Chip href={`/feed.xml?model=${encodeURIComponent(model.modelId)}`}>Feed</Chip>
+        </div>
+        <p class="small soft">
+          Listed {dayYear(model.firstSeenAt)} · last seen {ago(model.lastSeenAt)}
+          {model.knowledgeCutoff ? ` · knows the world to ${longDate(model.knowledgeCutoff)}` : ""}
+          {model.reasoning ? ` · reasoning${model.reasoning === "mandatory" ? " always on" : ""}` : ""}
+          {model.inputModalities && model.inputModalities !== "text" ? ` · ${model.inputModalities.split(",").join(" + ")} in` : ""}
+          {model.huggingFaceId ? <> · <a href={`https://huggingface.co/${model.huggingFaceId}`} class="acc hl" target="_blank" rel="noopener">open weights</a></> : null}
+        </p>
+        {alias && model.aliasTarget ? (
+          <p>This name always points at the newest model in its family. Right now that is <Link to={modelHref(targetId)} class="acc hl">{modelName(targetId, names.get(targetId))}</Link>.</p>
+        ) : null}
+        {model.description ? <p class="soft">{model.description.length > 420 ? `${model.description.slice(0, 420)}…` : model.description}</p> : null}
+        {tiers.length ? <p class="soft">Long prompts cost more: {tiers.map((t) => `above ${formatContext(String(t.minPromptTokens))} tokens, ${money(t.prompt)} in · ${money(t.completion)} out`).join("; ")}.</p> : null}
+      </div>
 
       {retiring || retired || expiring ? (
-        <Plaque class="border-danger/50 bg-danger/10">
+        <div class="box" style={{ borderColor: retired ? "var(--soft)" : "var(--rise)" }}>
           {retired ? (
-            <span><span class="font-bold uppercase tracking-[0.2em] text-danger">Departed.</span> {providerName(retired.provider)} stopped serving {retired.modelId}{retired.retiresAt ? ` on ${longDate(retired.retiresAt)}` : ""}.{retired.replacement ? ` Recommended replacement: ${retired.replacement}.` : ""}</span>
+            <p style={{ margin: 0 }}><b>Retired.</b> {providerName(retired.provider)} stopped serving {retired.modelId}{retired.retiresAt ? ` on ${longDate(retired.retiresAt)}` : ""}.{retired.replacement ? ` Recommended replacement: ${retired.replacement}.` : ""}</p>
           ) : retiring ? (
-            <span><span class="font-bold uppercase tracking-[0.2em] text-danger">Departing {countdown(retiring.retiresAt)}.</span> {providerName(retiring.provider)} deprecated {retiring.modelId}{retiring.deprecatedAt ? ` on ${longDate(retiring.deprecatedAt)}` : ""} and will retire it on {longDate(retiring.retiresAt)}.{retiring.replacement ? ` Recommended replacement: ${retiring.replacement}.` : ""}</span>
+            <p style={{ margin: 0 }}><b class="rise">Retiring {countdown(retiring.retiresAt)}.</b> {providerName(retiring.provider)} deprecated {retiring.modelId}{retiring.deprecatedAt ? ` on ${longDate(retiring.deprecatedAt)}` : ""} and will retire it on {longDate(retiring.retiresAt)}.{retiring.replacement ? ` Recommended replacement: ${retiring.replacement}.` : ""}</p>
           ) : (
-            <span><span class="font-bold uppercase tracking-[0.2em] text-warning">Listing expires {countdown(expiring)}.</span> OpenRouter has set {longDate(expiring)} as the last day for this listing.</span>
+            <p style={{ margin: 0 }}><b class="warn">Listing expires {countdown(expiring)}.</b> OpenRouter has set {longDate(expiring)} as the last day for this listing.</p>
           )}
-        </Plaque>
+        </div>
       ) : null}
 
-      <LogSection
+      <Section
         title="Price over time"
         hint="$ per million tokens"
         action={
           <>
-            {RANGES.map((r) => <Stencil key={r.key} href={`${modelHref(model.modelId)}?range=${r.key}`} active={range === r.key}>{r.label}</Stencil>)}
-            <span class="mx-1 h-4 w-px bg-line" aria-hidden="true" />
-            <Stencil active={tab === "chart"} onClick={() => setTab("chart")}>Chart</Stencil>
-            <Stencil active={tab === "table"} onClick={() => setTab("table")}>Table</Stencil>
+            {RANGES.map((r) => <Chip key={r.key} to={`${modelHref(model.modelId)}?range=${r.key}`} active={range === r.key}>{r.label}</Chip>)}
+            <span style={{ width: 1, height: 16, background: "var(--rule)", margin: "0 4px" }} aria-hidden="true" />
+            <Chip active={tab === "chart"} onClick={() => setTab("chart")}>Chart</Chip>
+            <Chip active={tab === "table"} onClick={() => setTab("table")}>Table</Chip>
           </>
         }
       >
@@ -204,151 +206,149 @@ export function ModelPage() {
           inputSeries.length ? (
             <StepChart series={series} from={from} lowLine={lowInput !== null && lowInput > 0 && Number(model.changeCount) > 0 ? { value: lowInput, label: `lowest input ${money(model.lowInput)}` } : undefined} />
           ) : (
-            <BoardEmpty>No price on record</BoardEmpty>
+            <Empty>No price on record.</Empty>
           )
         ) : (
           <StepTable series={series} />
         )}
-      </LogSection>
+      </Section>
 
       {contextSeries.length > 2 ? (
-        <LogSection title="Context window over time" hint="million tokens">
+        <Section title="Context window over time" hint="million tokens">
           <StepChart series={[{ key: "context", label: "context (M tokens)", points: contextSeries }]} from={from} height={160} formatValue={(v) => `${v >= 1 ? v.toFixed(v % 1 ? 1 : 0) : (v * 1000).toFixed(0) + "K"}${v >= 1 ? "M" : ""}`} />
-        </LogSection>
+        </Section>
       ) : null}
 
-      <Board label="Who serves it" hint={hosts.length ? `${plural(hosts.filter((h) => h.active).length, "host")} via OpenRouter` : "no host detail yet"} action={hosts.length > 15 ? <Sign onClick={() => setAllHosts((v) => !v)}>{allHosts ? "Fewer" : `All ${hosts.length}`}</Sign> : undefined}>
+      <Section title="Who serves it" hint={hosts.length ? `${plural(hosts.filter((h) => h.active).length, "host")} via OpenRouter` : "no host detail yet"} action={hosts.length > 15 ? <Chip onClick={() => setAllHosts((v) => !v)}>{allHosts ? "Fewer" : `All ${hosts.length}`}</Chip> : undefined}>
         {hosts.length === 0 ? (
-          <BoardEmpty>Host prices and uptime arrive with the next daily check</BoardEmpty>
+          <Empty>Host prices and uptime arrive with the next daily check.</Empty>
         ) : (
-          <>
-            <ColumnHeads columns={[{ label: "Host", width: 16, sticky: true }, { label: "Precision", width: 7 }, { label: "Context", width: 6, align: "right" }, { label: "In $/M", width: 7, align: "right" }, { label: "Out $/M", width: 7, align: "right" }, { label: "Uptime 24h", width: 12 }, { label: "Status", width: 8 }]} />
-            {shownHosts.map((h, i) => {
-              const up = Number(h.uptime1d);
-              const cheapest = cheapestHost && h.id === cheapestHost.id;
-              return (
-                <FlapRow
-                  key={h.id}
-                  label={`${h.host}: ${money(h.promptPrice)} in, ${money(h.completionPrice)} out per million, ${Number.isFinite(up) ? `${up.toFixed(1)}% uptime` : "no uptime reading"}${cheapest ? ", cheapest" : ""}${h.active ? "" : ", no longer serving"}`}
-                  delay={i * 40}
-                  class={h.active ? "" : "opacity-60"}
-                  columns={[
-                    { text: h.host, width: 16, sticky: true, tone: h.active ? "ink" : "muted" },
-                    { text: h.quantization && h.quantization !== "unknown" ? h.quantization : "-", width: 7, tone: "muted" },
-                    { text: formatContext(h.contextLength), width: 6, align: "right", tone: "muted" },
-                    { text: money(h.promptPrice), width: 7, align: "right", tone: cheapest ? "success" : "ink" },
-                    { text: money(h.completionPrice), width: 7, align: "right" },
-                    { text: "", width: 12, render: (
-                      <span class="inline-flex items-center gap-2" title={`${h.uptime1d}% over the last day`}>
-                        <span class="inline-block h-[10px] w-24 overflow-hidden rounded-[1px] bg-flap"><span class={`block h-full ${up >= 99 ? "bg-success" : up >= 95 ? "bg-warning" : "bg-danger"}`} style={{ width: `${Math.max(0, Math.min(100, Number.isFinite(up) ? up : 0))}%` }} /></span>
-                        <span class="font-mono text-xs tabular-nums text-ink-muted">{Number.isFinite(up) ? `${up.toFixed(1)}%` : "-"}</span>
-                      </span>
-                    ) },
-                    { text: !h.active ? "GONE" : cheapest ? "CHEAPEST" : up >= 99 ? "ON TIME" : up >= 95 ? "DELAYED" : "SPOTTY", width: 8, tone: !h.active ? "muted" : cheapest ? "success" : up >= 99 ? "success" : "warning" },
-                  ]}
-                />
-              );
-            })}
-          </>
+          <div class="tw">
+            <table>
+              <thead><tr><th>Host</th><th>Precision</th><th class="n">Context</th><th class="n">In $/M</th><th class="n">Out $/M</th><th>Uptime 24h</th><th class="n">Status</th></tr></thead>
+              <tbody>
+                {shownHosts.map((h) => {
+                  const up = Number(h.uptime1d);
+                  const cheapest = cheapestHost && h.id === cheapestHost.id;
+                  const word = !h.active ? { text: "gone", tone: "off" as PillTone } : cheapest ? { text: "cheapest", tone: "ok" as PillTone } : up >= 99 ? { text: "steady", tone: "ok" as PillTone } : up >= 95 ? { text: "uneven", tone: "warn" as PillTone } : { text: "spotty", tone: "bad" as PillTone };
+                  return (
+                    <tr key={h.id} class={h.active ? undefined : "dim"}>
+                      <td>{h.host}</td>
+                      <td class="soft small">{h.quantization && h.quantization !== "unknown" ? h.quantization : "–"}</td>
+                      <td class="n soft">{formatContext(h.contextLength)}</td>
+                      <td class={`n ${cheapest ? "cut" : ""}`}>{money(h.promptPrice)}</td>
+                      <td class="n">{money(h.completionPrice)}</td>
+                      <td>
+                        <span class="bar" title={`${h.uptime1d}% over the last day`}><i style={{ width: `${Math.max(0, Math.min(100, Number.isFinite(up) ? up : 0))}%`, background: up >= 99 ? "var(--cut)" : up >= 95 ? "var(--warn)" : "var(--rise)" }} /></span>
+                        <span class="mono small soft" style={{ marginLeft: 8 }}>{Number.isFinite(up) ? `${up.toFixed(1)}%` : "–"}</span>
+                      </td>
+                      <td class="n"><Pill tone={word.tone}>{word.text}</Pill></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
-      </Board>
+      </Section>
 
-      <Board label="Across price lists" hint={listings.length ? "what the provider's own listing says" : "not listed elsewhere"}>
+      <Section title="Across price lists" hint={listings.length ? "what the other lists say" : "not listed elsewhere"}>
         {listings.length === 0 ? (
-          <BoardEmpty>The other price lists have no entry for this model</BoardEmpty>
+          <Empty>The other price lists have no entry for this model.</Empty>
         ) : (
           <>
-            <ColumnHeads columns={[{ label: "List", width: 9, sticky: true }, { label: "Id there", width: 17 }, { label: "Context", width: 6, align: "right" }, { label: "In $/M", width: 7, align: "right" }, { label: "Out $/M", width: 7, align: "right" }, { label: "Released", width: 6 }, { label: "Vs here", width: 14 }]} />
-            {listings.map((l, i) => {
-              const inGap = pctChange(l.promptPrice, model.promptPrice);
-              const outGap = pctChange(l.completionPrice, model.completionPrice);
-              const same = (inGap === null || Math.abs(inGap) < 3) && (outGap === null || Math.abs(outGap) < 3);
-              const gapText = same ? "SAME PRICE" : [inGap !== null && Math.abs(inGap) >= 3 ? `IN ${boardPct(inGap)}` : "", outGap !== null && Math.abs(outGap) >= 3 ? `OUT ${boardPct(outGap)}` : ""].filter(Boolean).join(" ");
-              return (
-                <FlapRow
-                  key={l.id}
-                  label={`${SOURCE_LABEL[l.source] ?? l.source} lists ${l.sourceId} at ${money(l.promptPrice)} in, ${money(l.completionPrice)} out; ${same ? "same price as here" : gapText}`}
-                  delay={i * 40}
-                  class={l.active ? "" : "opacity-60"}
-                  columns={[
-                    { text: (SOURCE_LABEL[l.source] ?? l.source).split("'")[0], width: 9, sticky: true },
-                    { text: l.sourceId + (l.active ? "" : " GONE"), width: 17, tone: "muted" },
-                    { text: formatContext(l.contextLength), width: 6, align: "right", tone: "muted" },
-                    { text: money(l.promptPrice), width: 7, align: "right" },
-                    { text: money(l.completionPrice), width: 7, align: "right" },
-                    { text: l.releaseDate ? boardDate(l.releaseDate) : "-", width: 6, tone: "muted" },
-                    { text: gapText, width: 14, tone: same ? "success" : "warning" },
-                  ]}
-                />
-              );
-            })}
-            <p class="px-3 py-2 text-xs text-ink-muted">
-              "Vs here" compares the price tracked here with that list. A higher price here is what the middleman adds; lower means a discount.
-              {SOURCE_URL.litellm ? <> Lists: {listings.map((l, i) => <span key={l.id}>{i ? ", " : ""}<a href={l.sourceId && SOURCE_URL[l.source] ? SOURCE_URL[l.source] : "#"} target="_blank" rel="noopener" class="text-accent hover:underline">{SOURCE_LABEL[l.source]}</a></span>)}.</> : null}
-            </p>
+            <div class="tw">
+              <table>
+                <thead><tr><th>List</th><th>Id there</th><th class="n">Context</th><th class="n">In $/M</th><th class="n">Out $/M</th><th>Released</th><th class="n">Vs here</th></tr></thead>
+                <tbody>
+                  {listings.map((l) => {
+                    const inGap = pctChange(l.promptPrice, model.promptPrice);
+                    const outGap = pctChange(l.completionPrice, model.completionPrice);
+                    const same = (inGap === null || Math.abs(inGap) < 3) && (outGap === null || Math.abs(outGap) < 3);
+                    const gapText = same ? "same price" : [inGap !== null && Math.abs(inGap) >= 3 ? `in ${pct(inGap)}` : "", outGap !== null && Math.abs(outGap) >= 3 ? `out ${pct(outGap)}` : ""].filter(Boolean).join(" · ");
+                    return (
+                      <tr key={l.id} class={l.active ? undefined : "dim"}>
+                        <td>{SOURCE_URL[l.source] ? <a href={SOURCE_URL[l.source]} target="_blank" rel="noopener" class="hl">{SOURCE_LABEL[l.source] ?? l.source}</a> : SOURCE_LABEL[l.source] ?? l.source}</td>
+                        <td class="mono small soft">{l.sourceId}{l.active ? "" : " (gone)"}</td>
+                        <td class="n soft">{formatContext(l.contextLength)}</td>
+                        <td class="n">{money(l.promptPrice)}</td>
+                        <td class="n">{money(l.completionPrice)}</td>
+                        <td class="when">{l.releaseDate ? dayYear(l.releaseDate) : "–"}</td>
+                        <td class={`n ${same ? "cut" : "warn"}`}>{gapText}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p class="note" style={{ marginTop: 8 }}>"Vs here" compares the price tracked here with that list. A higher price here is what the middleman adds; lower means a discount.</p>
           </>
         )}
-      </Board>
+      </Section>
 
       {lifecycle.length ? (
-        <LogSection title="Notices" hint="from the providers' own pages">
-          <ul>
-            {lifecycle.map((l) => (
-              <LogLine key={l.id} left={<span class="uppercase">{(SOURCE_LABEL[l.source] ?? l.source).split("'")[0].slice(0, 7)}</span>} right={l.sourceUrl || SOURCE_URL[l.source] ? <a href={l.sourceUrl || SOURCE_URL[l.source]} target="_blank" rel="noopener" class="uppercase tracking-[0.15em] text-accent hover:underline">read</a> : null}>
-                <span class="font-mono text-xs text-ink-muted">{l.modelId}</span> <span>{noticeLine(l, tracked)}</span>
-              </LogLine>
-            ))}
-          </ul>
-        </LogSection>
+        <Section title="Notices" hint="from the providers' own pages">
+          <div class="tw">
+            <table>
+              <tbody>
+                {lifecycle.map((l) => (
+                  <tr key={l.id}>
+                    <td class="small soft" style={{ whiteSpace: "nowrap" }}>{SOURCE_LABEL[l.source] ?? l.source}</td>
+                    <td><span class="mono small soft">{l.modelId}</span> {noticeLine(l, tracked)}</td>
+                    <td class="n">{l.sourceUrl || SOURCE_URL[l.source] ? <a href={l.sourceUrl || SOURCE_URL[l.source]} target="_blank" rel="noopener" class="acc hl small">read →</a> : null}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Section>
       ) : null}
 
-      <LogSection title="History" hint={`${plural(stories.filter((s) => s.kind !== "drift").length, "change")}${stories.some((s) => s.kind === "drift") ? ` · ${plural(stories.filter((s) => s.kind === "drift").reduce((n, s) => n + (s.folded ?? 1), 0), "small move")} folded` : ""}`}>
+      <Section title="History" hint={`${plural(stories.filter((s) => s.kind !== "drift").length, "change")}${stories.some((s) => s.kind === "drift") ? ` · ${plural(stories.filter((s) => s.kind === "drift").reduce((n, s) => n + (s.folded ?? 1), 0), "small move")} folded` : ""}`}>
         {stories.length === 0 ? (
-          <BoardEmpty>Nothing has moved since it was first seen</BoardEmpty>
+          <Empty>Nothing has moved since it was first seen.</Empty>
         ) : (
-          <ul>{stories.map((s) => <StoryLine key={s.key} story={s} href={null} showMore date />)}</ul>
+          <StoryTable label="History">{stories.map((s) => <StoryRow key={s.key} story={s} href={null} showMore date />)}</StoryTable>
         )}
-      </LogSection>
+      </Section>
 
       {data.family.length ? (
-        <Board label="Same family" hint="from the same provider" action={<Sign to={compareHref([model.modelId, ...data.family.slice(0, 3).map((m) => m.modelId)])}>Compare these</Sign>}>
-          <ColumnHeads columns={[{ label: "Model", width: 22, sticky: true }, { label: "Id", width: 22 }, { label: "In $/M", width: 7, align: "right" }, { label: "Out $/M", width: 7, align: "right" }, { label: "Status", width: 10 }]} />
-          {data.family.slice(0, 15).map((m, i) => {
-            const pointsHere = Boolean(m.aliasTarget && canonicalKey(m.provider, m.aliasTarget) === key);
-            return (
-              <FlapRow
-                key={m.id}
-                href={modelHref(m.modelId)}
-                label={`${shortName(m.modelId, m.name)}: ${money(m.promptPrice)} in, ${money(m.completionPrice)} out${m.active ? "" : ", no longer listed"}${pointsHere ? ", points here" : ""}`}
-                delay={i * 40}
-                class={m.active ? "" : "opacity-60"}
-                columns={[
-                  { text: shortName(m.modelId, m.name), width: 22, sticky: true },
-                  { text: m.modelId, width: 22, tone: "muted" },
-                  { text: money(m.promptPrice), width: 7, align: "right" },
-                  { text: money(m.completionPrice), width: 7, align: "right" },
-                  { text: !m.active ? "CANCELLED" : pointsHere ? "POINTS HERE" : isAlias(m.modelId) ? "ALIAS" : "LISTED", width: 10, tone: !m.active ? "danger" : pointsHere ? "accent" : isAlias(m.modelId) ? "muted" : "success" },
-                ]}
-              />
-            );
-          })}
-        </Board>
+        <Section title="Same family" hint="from the same provider" action={<More to={compareHref([model.modelId, ...data.family.slice(0, 3).map((m) => m.modelId)])}>Compare these</More>}>
+          <div class="tw">
+            <table>
+              <thead><tr><th>Model</th><th>Id</th><th class="n">In $/M</th><th class="n">Out $/M</th><th class="n">Status</th></tr></thead>
+              <tbody>
+                {data.family.slice(0, 15).map((m) => {
+                  const pointsHere = Boolean(m.aliasTarget && canonicalKey(m.provider, m.aliasTarget) === key);
+                  return (
+                    <tr key={m.id} class={m.active ? undefined : "dim"}>
+                      <td><Link to={modelHref(m.modelId)} class="hl">{shortName(m.modelId, m.name)}</Link></td>
+                      <td class="mono small soft">{m.modelId}</td>
+                      <td class="n">{money(m.promptPrice)}</td>
+                      <td class="n">{money(m.completionPrice)}</td>
+                      <td class="n">{!m.active ? <Pill tone="bad">removed</Pill> : pointsHere ? <Pill>points here</Pill> : isAlias(m.modelId) ? <Pill tone="off">alias</Pill> : <Pill tone="ok">listed</Pill>}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Section>
       ) : null}
 
-      <Plaque class="flex flex-col gap-3">
-        <span class="text-[11px] font-bold uppercase tracking-[0.3em] text-accent">Take it with you</span>
-        <div class="flex flex-wrap items-center gap-3">
+      <Section title="Take it with you">
+        <div class="chips" style={{ marginBottom: 10 }}>
           <img src={`/badge.svg?model=${encodeURIComponent(model.modelId)}&metric=input`} alt={`input price badge for ${model.modelId}`} height={20} />
           <img src={`/badge.svg?model=${encodeURIComponent(model.modelId)}&metric=changed`} alt={`last change badge for ${model.modelId}`} height={20} />
-          <CopySign text={badgeMarkdown} label="Copy markdown" />
+          <CopyChip text={badgeMarkdown} label="Copy markdown" />
         </div>
-        <CodeBlock language="markdown" code={badgeMarkdown} />
-        <p class="text-xs text-ink-muted">
-          <Link to="/api" class="text-accent hover:underline">All badges, feeds and JSON</Link>
-          {" · "}<a href={`/feed.xml?model=${encodeURIComponent(model.modelId)}`} class="text-accent hover:underline">RSS for this model</a>
-          {" · "}<a href={`/api/model.json?id=${encodeURIComponent(model.modelId)}`} class="text-accent hover:underline">JSON</a>
+        <pre class="box mono small" style={{ margin: "0 0 10px", overflowX: "auto", whiteSpace: "pre" }}>{badgeMarkdown}</pre>
+        <p class="note">
+          <Link to="/api" class="acc hl">All badges, feeds and JSON</Link>
+          {" · "}<a href={`/feed.xml?model=${encodeURIComponent(model.modelId)}`} class="acc hl">Feed for this model</a>
+          {" · "}<a href={`/api/model.json?id=${encodeURIComponent(model.modelId)}`} class="acc hl">JSON</a>
         </p>
-      </Plaque>
+      </Section>
     </div>
   );
 }

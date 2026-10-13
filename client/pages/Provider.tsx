@@ -8,14 +8,12 @@ import { Link, useParams, useQuery } from "@spacefast/zero/client";
 import { formatContext, money } from "../../shared/model";
 import { isAlias, providerName } from "../../shared/providers";
 import type { ArchiveEvent, ProviderPageData } from "../../shared/types";
-import { Board, ColumnHeads, FlapRow, FlapText, Sign } from "../components/Flap";
-import { BoardEmpty, LogDay, LogLine, LogSection, PageSkeleton, StoryLine } from "../components/Log";
 import { StepChart, type StepSeries } from "../components/StepChart";
-import { boardDate, boardTime, departureStatus, remarkWord, shortName, statusWord } from "../lib/board";
+import { Chip, DayRow, Empty, PageHead, Pill, Section, Skeleton, Stat, StoryRow, StoryTable, UptimeStrip } from "../components/Wire";
 import { uptimeDays, uptimeSummary } from "../lib/series";
 import { assembleStories, keyIndex, nameIndex, storyHref } from "../lib/stories";
+import { dayShort, daysLeft, hm, pct, shortName, statusRemark, statusWord } from "../lib/text";
 import { DAY, ago, dayLabel, isLoading, longDate, modelHref, plural, usePageTitle, useSince } from "../lib/util";
-import { UptimeStrip } from "./Home";
 
 export function ProviderPage() {
   const { slug = "" } = useParams() as { slug?: string };
@@ -32,12 +30,11 @@ export function ProviderPage() {
   const stories = useMemo(() => (loading ? [] : assembleStories({ events: data.events, names })), [loading, data, names]);
   const ownRecent = (recent ?? []).filter((e) => e.provider.replace(/^~/, "") === slug);
 
-  if (loading) return <PageSkeleton />;
+  if (loading) return <Skeleton />;
   if (models.length === 0) {
     return (
-      <div class="flex flex-col gap-4">
-        <FlapText text="UNKNOWN PROVIDER" width={16} size="lg" tone="danger" />
-        <p class="text-sm text-ink-muted">No models from "{slug}" have been seen. <Link to="/providers" class="text-accent hover:underline">All providers</Link>.</p>
+      <div class="stack">
+        <PageHead title="Unknown provider">No models from "{slug}" have been seen. <Link to="/providers">All providers</Link>.</PageHead>
       </div>
     );
   }
@@ -46,7 +43,7 @@ export function ProviderPage() {
   const retired = models.filter((m) => !m.active);
   const days = uptimeDays(data.status, data.statusEvents, data.incidents, 90);
   const sum = uptimeSummary(days);
-  const spec = data.status ? statusWord(data.status.indicator) : { word: "NO PAGE", tone: "muted" as const };
+  const word = data.status ? statusWord(data.status.indicator) : null;
 
   const daily = data.daily;
   const medianSeries: StepSeries[] = daily.length > 1 ? [
@@ -69,114 +66,129 @@ export function ProviderPage() {
   const lastMove = (m: typeof active[number]) => ownRecent.find((e) => e.modelId === m.modelId && e.kind === "changed" && e.field === "promptPrice");
 
   return (
-    <div class="flex flex-col gap-8">
-      <Board label={name} hint={data.status?.description ? remarkWord(data.status.indicator, data.status.description).toLowerCase() : "no status page tracked"} action={<Sign href={`/feed.xml?provider=${encodeURIComponent(slug)}`}>RSS</Sign>}>
-        <div class="flex flex-col gap-4 px-3 py-4">
-          <div class="flex flex-wrap items-center justify-between gap-4">
-            <h1><FlapText text={name} width={Math.min(24, Math.max(6, name.length))} size="lg" /></h1>
-            <FlapText text={spec.word} width={9} size="lg" tone={spec.tone} delay={200} />
-          </div>
-          <p class="text-xs uppercase tracking-[0.2em] text-ink-muted">
-            {plural(active.length, "model")} listed{retired.length ? ` · ${retired.length} no longer listed` : ""}
-            {leaving.length ? <> · <Link to="/retiring" class="text-danger hover:underline">{plural(leaving.length, "departure")} announced</Link></> : null}
-            {data.status ? ` · checked ${ago(data.status.checkedAt)}` : ""}
-          </p>
-          {data.status ? (
-            <div class="flex flex-col gap-1">
-              <div class="overflow-x-auto"><UptimeStrip days={days} label={`${name} over the last 90 days`} /></div>
-              <span class="text-[11px] uppercase tracking-[0.2em] text-ink-muted">90 days · {sum.recorded === 0 ? "no record yet" : sum.incidentDays === 0 ? `no incidents in ${sum.recorded} recorded days` : `${sum.incidentDays} incident days of ${sum.recorded} recorded`}</span>
-            </div>
-          ) : null}
-        </div>
-      </Board>
+    <div class="stack">
+      <PageHead title={name} action={<><Chip to={`/models?provider=${encodeURIComponent(slug)}`}>All models</Chip><Chip href={`/feed.xml?provider=${encodeURIComponent(slug)}`}>Feed</Chip></>}>
+        {plural(active.length, "model")} listed{retired.length ? `, ${retired.length} no longer listed` : ""}
+        {leaving.length ? <>, <Link to="/retiring">{plural(leaving.length, "retirement")} announced</Link></> : null}.
+        {data.status ? ` Status page checked ${ago(data.status.checkedAt)}.` : " No status page tracked."}
+      </PageHead>
 
-      <Board label="Models" hint={`${active.length} listed, most recently moved first`} action={<Sign to={`/models?provider=${encodeURIComponent(slug)}`}>Full list</Sign>}>
-        <ColumnHeads columns={[{ label: "Model", width: 22, sticky: true }, { label: "Context", width: 6, align: "right" }, { label: "In $/M", width: 7, align: "right" }, { label: "Out $/M", width: 7, align: "right" }, { label: "Last move", width: 12 }, { label: "Listed", width: 6 }]} />
-        {movers.map((m, i) => {
-          const move = lastMove(m);
-          const pct = move ? ((Number(move.newValue) - Number(move.oldValue)) / Number(move.oldValue)) * 100 : null;
-          const moveText = move && pct !== null && Number.isFinite(pct) ? `${boardDate(move.at)} ${pct < 0 ? "▼" : "▲"}${Math.abs(pct) >= 10 ? Math.round(Math.abs(pct)) : Math.abs(pct).toFixed(1)}%` : m.lastChangedAt ? boardDate(m.lastChangedAt) : "-";
-          return (
-            <FlapRow
-              key={m.id}
-              href={modelHref(m.modelId)}
-              label={`${shortName(m.modelId, m.name)}: ${money(m.promptPrice)} in, ${money(m.completionPrice)} out, ${formatContext(m.contextLength)} context, listed ${longDate(m.firstSeenAt)}`}
-              delay={i * 40}
-              columns={[
-                { text: isAlias(m.modelId) ? `${shortName(m.modelId, m.name).slice(0, 16)} ALIAS` : shortName(m.modelId, m.name), width: 22, sticky: true },
-                { text: formatContext(m.contextLength), width: 6, align: "right", tone: "muted" },
-                { text: money(m.promptPrice), width: 7, align: "right" },
-                { text: money(m.completionPrice), width: 7, align: "right" },
-                { text: moveText, width: 12, tone: pct === null ? "muted" : pct < 0 ? "success" : "warning" },
-                { text: boardDate(m.firstSeenAt), width: 6, tone: "muted" },
-              ]}
-            />
-          );
-        })}
-      </Board>
+      {data.status ? (
+        <div class="stats">
+          <div class="stat">
+            <div class="v"><Pill tone={word?.tone}>{word?.word}</Pill></div>
+            <div class="l">{statusRemark(data.status.indicator, data.status.description)}</div>
+          </div>
+          <div class="stat">
+            <div class="v"><UptimeStrip days={days} label={`${name} over the last 90 days`} /></div>
+            <div class="l">90 days · {sum.recorded === 0 ? "no record yet" : sum.incidentDays === 0 ? `no incidents in ${sum.recorded} recorded days` : `${sum.incidentDays} incident days of ${sum.recorded} recorded`}</div>
+          </div>
+          <Stat value={String(active.length)} label="models listed" href={`/models?provider=${encodeURIComponent(slug)}`} />
+        </div>
+      ) : null}
+
+      <Section title="Models" hint={`${active.length} listed, most recently moved first`}>
+        <div class="tw">
+          <table aria-label={`${name} models`}>
+            <thead><tr><th>Model</th><th class="n">Context</th><th class="n">In $/M</th><th class="n">Out $/M</th><th>Last move</th><th>Listed</th></tr></thead>
+            <tbody>
+              {movers.map((m) => {
+                const move = lastMove(m);
+                const delta = move ? ((Number(move.newValue) - Number(move.oldValue)) / Number(move.oldValue)) * 100 : null;
+                const moved = delta !== null && Number.isFinite(delta);
+                return (
+                  <tr key={m.id} data-feed-row>
+                    <td>
+                      <Link to={modelHref(m.modelId)} class="hl">{shortName(m.modelId, m.name)}</Link>
+                      {isAlias(m.modelId) ? <span class="tag">alias</span> : null}
+                    </td>
+                    <td class="n soft">{formatContext(m.contextLength)}</td>
+                    <td class="n">{money(m.promptPrice)}</td>
+                    <td class="n">{money(m.completionPrice)}</td>
+                    <td class="when">
+                      {move && moved ? <>{dayShort(move.at)} <span class={delta < 0 ? "cut" : "rise"}>{pct(delta)}</span></> : m.lastChangedAt ? dayShort(m.lastChangedAt) : "—"}
+                    </td>
+                    <td class="when" title={longDate(m.firstSeenAt)}>{dayShort(m.firstSeenAt)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Section>
 
       {medianSeries.length ? (
-        <LogSection title="Price direction" hint="median price across this provider's listed models, per day">
-          <StepChart series={medianSeries} from={Date.parse(`${daily[0].date}T00:00:00Z`)} height={200} />
-        </LogSection>
+        <Section title="Price direction" hint="median price across this provider's listed models, per day">
+          <div class="box">
+            <StepChart series={medianSeries} from={Date.parse(`${daily[0].date}T00:00:00Z`)} height={200} />
+          </div>
+        </Section>
       ) : null}
 
       {leaving.length ? (
-        <Board label="Departures" hint="from the provider's own notices" action={<Sign to="/retiring">All departures</Sign>}>
-          <ColumnHeads columns={[{ label: "Retires", width: 6, sticky: true }, { label: "Model", width: 22, sticky: true }, { label: "Gate", width: 16 }, { label: "Status", width: 10 }]} />
-          {leaving.map((l, i) => {
-            const status = departureStatus(l.retiresAt);
-            const tracked = keys.get(l.key);
-            return (
-              <FlapRow
-                key={l.id}
-                href={tracked ? modelHref(tracked) : null}
-                label={`${name} retires ${l.modelId} on ${l.retiresAt}${l.replacement ? `, replacement ${l.replacement}` : ""}`}
-                delay={i * 40}
-                class={status.word === "DEPARTED" ? "opacity-60" : ""}
-                columns={[
-                  { text: boardDate(l.retiresAt), width: 6, sticky: true, tone: "muted" },
-                  { text: l.modelId, width: 22, sticky: true, tone: status.word === "DEPARTED" ? "danger" : "ink" },
-                  { text: l.replacement || "-", width: 16, tone: l.replacement ? "ink" : "muted" },
-                  { text: status.word, width: 10, tone: status.tone },
-                ]}
-              />
-            );
-          })}
-        </Board>
+        <Section title="Retiring" hint="from the provider's own notices" action={<Chip to="/retiring">All retirements</Chip>}>
+          <div class="tw">
+            <table aria-label={`${name} retirements`}>
+              <thead><tr><th>Retires</th><th>Model</th><th>Replacement</th><th class="n">Left</th></tr></thead>
+              <tbody>
+                {leaving.map((l) => {
+                  const left = daysLeft(l.retiresAt);
+                  const tracked = keys.get(l.key);
+                  return (
+                    <tr key={l.id} data-feed-row class={left.text === "retired" ? "dim" : undefined}>
+                      <td class="when">{dayShort(l.retiresAt)}</td>
+                      <td>{tracked ? <Link to={modelHref(tracked)} class="hl">{l.modelId}</Link> : l.modelId}</td>
+                      <td class="soft small">{l.replacement || "—"}</td>
+                      <td class="n"><Pill tone={left.tone}>{left.text}</Pill></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Section>
       ) : null}
 
-      <div class="grid gap-8 lg:grid-cols-2">
-        <LogSection title="Changes" hint="newest first">
+      <div class="two" style={{ padding: 0 }}>
+        <Section title="Changes" hint="newest first">
           {stories.length === 0 ? (
-            <BoardEmpty>Nothing recorded yet</BoardEmpty>
+            <Empty>Nothing recorded yet.</Empty>
           ) : (
-            <ul>{stories.filter((s) => s.kind !== "drift").slice(0, 40).map((s) => <StoryLine key={s.key} story={s} href={storyHref(s, keys)} date />)}</ul>
+            <StoryTable label={`${name} changes`}>
+              {stories.filter((s) => s.kind !== "drift").slice(0, 40).map((s) => <StoryRow key={s.key} story={s} href={storyHref(s, keys)} date />)}
+            </StoryTable>
           )}
-        </LogSection>
-        <LogSection title="Incidents" hint="last 90 days, from the status page">
+        </Section>
+        <Section title="Incidents" hint="last 90 days, from the status page">
           {data.incidents.length === 0 ? (
-            <BoardEmpty>{data.status ? "No incidents recorded" : "No status page tracked"}</BoardEmpty>
+            <Empty>{data.status ? "No incidents recorded." : "No status page tracked."}</Empty>
           ) : (
-            [...incidentsByDay.entries()].map(([day, list]) => (
-              <div key={day}>
-                <LogDay>{dayLabel(day)}</LogDay>
-                <ul>
-                  {list.map((i) => (
-                    <LogLine
-                      key={i.id}
-                      left={boardTime(i.startedAt)}
-                      right={<span class={i.impact === "critical" || i.impact === "major" ? "text-danger" : i.impact === "minor" ? "text-warning" : "text-ink-muted"}>{i.resolvedAt ? `${Math.max(1, Math.round((Date.parse(i.resolvedAt) - Date.parse(i.startedAt)) / 60000))} MIN` : i.status === "resolved" ? "RESOLVED" : `ONGOING · ${ago(i.startedAt).toUpperCase()}`}</span>}
-                    >
-                      <span class="mr-2 text-[10px] uppercase tracking-[0.2em] text-ink-muted">{i.impact || "incident"}</span>
-                      {i.url ? <a href={i.url} target="_blank" rel="noopener" class="hover:text-accent">{i.name}</a> : i.name}
-                    </LogLine>
+            <div class="tw">
+              <table aria-label={`${name} incidents`}>
+                <thead><tr><th>Time</th><th>Incident</th><th class="n">Lasted</th></tr></thead>
+                <tbody>
+                  {[...incidentsByDay.entries()].map(([day, list]) => (
+                    <>
+                      <DayRow key={day}>{dayLabel(day)}</DayRow>
+                      {list.map((i) => (
+                        <tr key={i.id} data-feed-row>
+                          <td class="when">{hm(i.startedAt)}</td>
+                          <td>
+                            {i.url ? <a href={i.url} target="_blank" rel="noopener" class="hl">{i.name}</a> : i.name}
+                            <span class="who">{i.impact || "incident"}</span>
+                          </td>
+                          <td class={`n ${i.impact === "critical" || i.impact === "major" ? "rise" : i.impact === "minor" ? "warn" : "soft"}`}>
+                            {i.resolvedAt ? `${Math.max(1, Math.round((Date.parse(i.resolvedAt) - Date.parse(i.startedAt)) / 60000))} min` : i.status === "resolved" ? "resolved" : `ongoing · ${ago(i.startedAt)}`}
+                          </td>
+                        </tr>
+                      ))}
+                    </>
                   ))}
-                </ul>
-              </div>
-            ))
+                </tbody>
+              </table>
+            </div>
           )}
-        </LogSection>
+        </Section>
       </div>
     </div>
   );

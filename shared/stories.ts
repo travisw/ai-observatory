@@ -6,7 +6,7 @@
  * that happened to one model in one sweep, with a headline, a score for how much it matters,
  * and the rows underneath for anyone who wants them.
  */
-import { contextPair, formatContext, longDate, money } from "./model";
+import { FIELD_LABELS, contextPair, formatContext, longDate, money } from "./model";
 import { isAlias, modelName, providerName } from "./providers";
 import type { ArchiveEvent, HostEvent, LifecycleEvent } from "./types";
 
@@ -493,7 +493,9 @@ export function hostStories(events: HostEvent[], names: Map<string, string>): St
     const more = others.map((e) =>
       e.field === "contextLength" || e.field === "maxCompletion"
         ? `${SIZE_LABEL[e.field]} ${contextPair(e.oldValue, e.newValue)}`
-        : `${e.field} ${e.oldValue || "none"} → ${e.newValue || "none"}`
+        : e.field === "cacheReadPrice" || e.field === "cacheWritePrice"
+          ? `${PRICE_LABEL[e.field]} ${money(e.oldValue)} → ${money(e.newValue)}`
+          : `${FIELD_LABELS[e.field] ?? e.field} ${e.oldValue || "none"} → ${e.newValue || "none"}`
     );
     if (prices.length) {
       const moves = prices.map((e) => pct(e.oldValue, e.newValue));

@@ -1,17 +1,16 @@
 /**
- * The catalogue as it was on any past day, the sky that night, and what differs from today.
+ * The catalogue as it was on any past day, price against capability that day, and what differs from today.
  */
 import { useMemo } from "preact/hooks";
-import { useNavigate, useQuery } from "@spacefast/zero/client";
+import { Link, useNavigate, useQuery } from "@spacefast/zero/client";
 
 import { formatContext, money } from "../../shared/model";
 import { isAlias, providerName } from "../../shared/providers";
 import type { CatalogueAtData, ModelRow } from "../../shared/types";
-import { Board, ColumnHeads, FlapRow, FlapText } from "../components/Flap";
-import { BoardEmpty, LogSection, Marquee, PageSkeleton, SignInput } from "../components/Log";
 import { StarChart } from "../components/StarChart";
-import { boardDateYear, boardPct, shortName } from "../lib/board";
-import { isLoading, longDate, modelHref, pctChange, plural, usePageTitle, useSearchParams } from "../lib/util";
+import { Delta, Empty, PageHead, Pill, Section, Skeleton, TextInput } from "../components/Wire";
+import { dayYear, shortName } from "../lib/text";
+import { isLoading, modelHref, pctChange, plural, usePageTitle, useSearchParams } from "../lib/util";
 
 export function TimeMachinePage() {
   usePageTitle("Time machine");
@@ -37,113 +36,118 @@ export function TimeMachinePage() {
     return { added, removed, repriced };
   }, [at, past, now]);
 
-  const listed = (m: ModelRow) => `${providerName(m.provider)} ${shortName(m.modelId, m.name)}`;
+  const listed = (m: ModelRow) => <><span class="soft">{providerName(m.provider)} </span>{shortName(m.modelId, m.name)}</>;
+  const more = (n: number) => (n > 15 ? <p class="note">and {n - 15} more</p> : null);
 
   return (
-    <div class="flex flex-col gap-8">
-      <Marquee title="Time machine">
+    <div class="stack">
+      <PageHead
+        title="Time machine"
+        action={
+          <label class="chips" style={{ gap: 10 }}>
+            <span class="tiny">Catalogue as of</span>
+            <TextInput type="date" value={at} max={today} onInput={(v) => navigate(`/time-machine?at=${v}`)} label="Date" style={{ fontFamily: "'IBM Plex Mono', SFMono-Regular, Menlo, monospace" }} />
+          </label>
+        }
+      >
         Pick a day and see the catalogue exactly as it stood at the end of it, rebuilt from the record of every change since. Then see what is different today. Links to a date can be shared.
-      </Marquee>
-
-      <div class="flex flex-wrap items-end gap-6">
-        <div class="flex flex-col gap-1.5">
-          <span class="text-[11px] font-semibold uppercase tracking-[0.3em] text-ink-muted">Catalogue as of</span>
-          <FlapText text={at ? boardDateYear(at) : "-- --- --"} width={9} size="lg" tone={at ? "ink" : "muted"} />
-        </div>
-        <SignInput type="date" value={at} max={today} onInput={(v) => navigate(`/time-machine?at=${v}`)} label="Date" class="font-mono" />
-      </div>
+      </PageHead>
 
       {!at ? (
-        <BoardEmpty>Choose a date. Any day since the record began.</BoardEmpty>
+        <Empty>Choose a date. Any day since the record began.</Empty>
       ) : isLoading(past) ? (
-        <PageSkeleton />
+        <Skeleton />
       ) : (
         <>
           {diff ? (
             <>
-              <p class="text-[11px] font-semibold uppercase tracking-[0.3em] text-ink-muted">
-                Since {longDate(at)}: {plural(diff.added.length, "model")} added, {diff.removed.length} removed, {diff.repriced.length} repriced by 3% or more
+              <p class="note">
+                Since {dayYear(at)}: {plural(diff.added.length, "model")} added, {diff.removed.length} removed, {diff.repriced.length} repriced by 3% or more.
               </p>
-              <Board label="Added" hint="listed since then">
-                {diff.added.length === 0 ? <BoardEmpty>None</BoardEmpty> : (
-                  <>
-                    <ColumnHeads columns={[{ label: "Model", width: 32, sticky: true }, { label: "In $/M", width: 7, align: "right" }, { label: "Out $/M", width: 7, align: "right" }, { label: "Context", width: 6, align: "right" }, { label: "Status", width: 8 }]} />
-                    {diff.added.slice(0, 15).map((m, i) => (
-                      <FlapRow key={m.id} href={modelHref(m.modelId)} label={`${listed(m)} arrived: ${money(m.promptPrice)} in, ${money(m.completionPrice)} out`} delay={i * 40} columns={[
-                        { text: listed(m), width: 32, sticky: true },
-                        { text: money(m.promptPrice), width: 7, align: "right" },
-                        { text: money(m.completionPrice), width: 7, align: "right" },
-                        { text: formatContext(m.contextLength), width: 6, align: "right", tone: "muted" },
-                        { text: "ARRIVED", width: 8, tone: "success" },
-                      ]} />
-                    ))}
-                    {diff.added.length > 15 ? <p class="px-3 py-2 text-xs text-ink-muted">and {diff.added.length - 15} more</p> : null}
-                  </>
+              <Section title="Added" hint="listed since then">
+                {diff.added.length === 0 ? <Empty>None.</Empty> : (
+                  <div class="tw">
+                    <table>
+                      <thead><tr><th>Model</th><th class="n">In $/M</th><th class="n">Out $/M</th><th class="n">Context</th></tr></thead>
+                      <tbody>
+                        {diff.added.slice(0, 15).map((m) => (
+                          <tr key={m.id}>
+                            <td><Link to={modelHref(m.modelId)} class="hl">{listed(m)}</Link></td>
+                            <td class="n">{money(m.promptPrice)}</td>
+                            <td class="n">{money(m.completionPrice)}</td>
+                            <td class="n soft">{formatContext(m.contextLength)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {more(diff.added.length)}
+                  </div>
                 )}
-              </Board>
-              <Board label="Gone" hint="listed then, not now">
-                {diff.removed.length === 0 ? <BoardEmpty>None</BoardEmpty> : (
-                  <>
-                    <ColumnHeads columns={[{ label: "Model", width: 32, sticky: true }, { label: "In $/M then", width: 11, align: "right" }, { label: "Out $/M then", width: 12, align: "right" }, { label: "Status", width: 9 }]} />
-                    {diff.removed.slice(0, 15).map((m, i) => (
-                      <FlapRow key={m.modelId} href={modelHref(m.modelId)} label={`${listed(m)} is gone; it was ${money(m.promptPrice)} in, ${money(m.completionPrice)} out`} delay={i * 40} columns={[
-                        { text: listed(m), width: 32, sticky: true, tone: "danger" },
-                        { text: money(m.promptPrice), width: 11, align: "right", tone: "muted" },
-                        { text: money(m.completionPrice), width: 12, align: "right", tone: "muted" },
-                        { text: "CANCELLED", width: 9, tone: "danger" },
-                      ]} />
-                    ))}
-                    {diff.removed.length > 15 ? <p class="px-3 py-2 text-xs text-ink-muted">and {diff.removed.length - 15} more</p> : null}
-                  </>
+              </Section>
+              <Section title="Gone" hint="listed then, not now">
+                {diff.removed.length === 0 ? <Empty>None.</Empty> : (
+                  <div class="tw">
+                    <table>
+                      <thead><tr><th>Model</th><th class="n">In $/M then</th><th class="n">Out $/M then</th><th class="n">Status</th></tr></thead>
+                      <tbody>
+                        {diff.removed.slice(0, 15).map((m) => (
+                          <tr key={m.modelId}>
+                            <td><Link to={modelHref(m.modelId)} class="hl">{listed(m)}</Link></td>
+                            <td class="n soft">{money(m.promptPrice)}</td>
+                            <td class="n soft">{money(m.completionPrice)}</td>
+                            <td class="n"><Pill tone="bad">removed</Pill></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {more(diff.removed.length)}
+                  </div>
                 )}
-              </Board>
-              <Board label="Repriced" hint="input price then and now, biggest cuts first">
-                {diff.repriced.length === 0 ? <BoardEmpty>None</BoardEmpty> : (
-                  <>
-                    <ColumnHeads columns={[{ label: "Model", width: 32, sticky: true }, { label: "Was", width: 7, align: "right" }, { label: "Now", width: 7, align: "right" }, { label: "Change", width: 9 }]} />
-                    {diff.repriced.slice(0, 15).map((r, i) => (
-                      <FlapRow key={r.now.id} href={modelHref(r.now.modelId)} label={`${listed(r.now)}: ${money(r.then.promptPrice)} then, ${money(r.now.promptPrice)} now`} delay={i * 40} columns={[
-                        { text: listed(r.now), width: 32, sticky: true },
-                        { text: money(r.then.promptPrice), width: 7, align: "right", tone: "muted" },
-                        { text: money(r.now.promptPrice), width: 7, align: "right" },
-                        { text: boardPct(r.pct ?? 0), width: 9, tone: (r.pct ?? 0) < 0 ? "success" : "warning" },
-                      ]} />
-                    ))}
-                    {diff.repriced.length > 15 ? <p class="px-3 py-2 text-xs text-ink-muted">and {diff.repriced.length - 15} more</p> : null}
-                  </>
+              </Section>
+              <Section title="Repriced" hint="input price then and now, biggest cuts first">
+                {diff.repriced.length === 0 ? <Empty>None.</Empty> : (
+                  <div class="tw">
+                    <table>
+                      <thead><tr><th>Model</th><th class="n">Was</th><th class="n">Now</th><th class="n">Change</th></tr></thead>
+                      <tbody>
+                        {diff.repriced.slice(0, 15).map((r) => (
+                          <tr key={r.now.id}>
+                            <td><Link to={modelHref(r.now.modelId)} class="hl">{listed(r.now)}</Link></td>
+                            <td class="n soft">{money(r.then.promptPrice)}</td>
+                            <td class="n">{money(r.now.promptPrice)}</td>
+                            <td class="n"><Delta value={r.pct ?? 0} good={(r.pct ?? 0) < 0} /></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {more(diff.repriced.length)}
+                  </div>
                 )}
-              </Board>
+              </Section>
             </>
           ) : null}
 
-          <Board label={`The sky on ${longDate(at)}`} hint="every scored model that night">
-            <div class="p-3"><StarChart models={past.models} title={`The sky on ${longDate(at)}`} height={380} /></div>
-          </Board>
+          <Section title={`Price against capability on ${dayYear(at)}`} hint="every scored model that day">
+            <div class="box"><StarChart models={past.models} title={`Price against capability on ${dayYear(at)}`} height={380} /></div>
+          </Section>
 
-          <LogSection title={`The catalogue on ${longDate(at)}`} hint={plural(past.models.length, "model")}>
-            <div class="overflow-x-auto">
-              <table class="w-full text-sm">
-                <thead>
-                  <tr class="border-b border-accent/40 text-left text-[11px] uppercase tracking-[0.2em] text-ink-muted">
-                    <th class="py-2 pr-3 font-semibold">Model</th>
-                    <th class="py-2 pr-3 text-right font-semibold">Context</th>
-                    <th class="py-2 pr-3 text-right font-semibold">In $/M</th>
-                    <th class="py-2 text-right font-semibold">Out $/M</th>
-                  </tr>
-                </thead>
+          <Section title={`The catalogue on ${dayYear(at)}`} hint={plural(past.models.length, "model")}>
+            <div class="tw">
+              <table>
+                <thead><tr><th>Model</th><th class="n">Context</th><th class="n">In $/M</th><th class="n">Out $/M</th></tr></thead>
                 <tbody>
                   {past.models.slice().sort((a, b) => a.modelId.localeCompare(b.modelId)).map((m) => (
-                    <tr key={m.modelId} class="border-b border-dotted border-line last:border-0">
-                      <td class="py-1 pr-3"><a href={modelHref(m.modelId)} class="text-[15px] text-ink hover:text-accent"><span class="text-ink-muted">{providerName(m.provider)} </span>{shortName(m.modelId, m.name)}</a></td>
-                      <td class="py-1 pr-3 text-right font-mono text-xs tabular-nums text-ink-muted">{formatContext(m.contextLength)}</td>
-                      <td class="py-1 pr-3 text-right font-mono text-xs tabular-nums text-ink">{money(m.promptPrice)}</td>
-                      <td class="py-1 text-right font-mono text-xs tabular-nums text-ink">{money(m.completionPrice)}</td>
+                    <tr key={m.modelId}>
+                      <td><Link to={modelHref(m.modelId)} class="hl">{listed(m)}</Link></td>
+                      <td class="n soft">{formatContext(m.contextLength)}</td>
+                      <td class="n">{money(m.promptPrice)}</td>
+                      <td class="n">{money(m.completionPrice)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          </LogSection>
+          </Section>
         </>
       )}
     </div>

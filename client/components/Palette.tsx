@@ -4,9 +4,6 @@
  */
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { useNavigate, useQuery } from "@spacefast/zero/client";
-import { Icon, Kbd } from "@spacefast/zero/kit";
-
-import { BOARD_FONT } from "./Flap";
 
 import { isAlias, modelName, providerName } from "../../shared/providers";
 import type { ModelRow } from "../../shared/types";
@@ -17,19 +14,19 @@ export type PaletteMode = { kind: "navigate" } | { kind: "pick"; onPick: (modelI
 type Item = { id: string; group: string; label: string; hint?: string; run: () => void };
 
 const PAGES: { path: string; label: string }[] = [
-  { path: "/", label: "The hall" },
-  { path: "/changes", label: "The log" },
-  { path: "/providers", label: "Providers" },
+  { path: "/", label: "Today" },
+  { path: "/changes", label: "Changes" },
   { path: "/models", label: "Models" },
+  { path: "/providers", label: "Providers" },
+  { path: "/retiring", label: "Retirements" },
   { path: "/status", label: "Status" },
-  { path: "/retiring", label: "Departures" },
+  { path: "/index", label: "Price index" },
   { path: "/compare", label: "Compare" },
   { path: "/records", label: "Records" },
-  { path: "/index", label: "Price index" },
   { path: "/graveyard", label: "Graveyard" },
   { path: "/time-machine", label: "Time machine" },
   { path: "/pulse", label: "Pulse" },
-  { path: "/api", label: "API and feeds" },
+  { path: "/api", label: "API & feeds" },
   { path: "/about", label: "About" },
 ];
 
@@ -128,54 +125,48 @@ export function Palette(props: { open: boolean; onClose: () => void; mode: Palet
 
   let lastGroup = "";
   return (
-    <div class="fixed inset-0 z-50 flex items-start justify-center bg-black/70 p-4 pt-[12vh]" onClick={(e) => { if (e.target === e.currentTarget) props.onClose(); }}>
-      <div class="w-full max-w-xl overflow-hidden rounded-md border border-line bg-surface shadow-[0_12px_40px_rgba(0,0,0,0.7)]" role="dialog" aria-modal="true" aria-label={props.mode.kind === "pick" ? props.mode.title : "Search"} style={{ fontFamily: BOARD_FONT }}>
-        <div class="flex items-center gap-2 border-b border-line bg-flap px-3">
-          <Icon name="search" size="sm" class="text-accent" />
-          <input
-            ref={input}
-            class="w-full bg-transparent py-3 text-base text-ink outline-none placeholder:text-ink-muted"
-            placeholder={props.mode.kind === "pick" ? props.mode.title : "Find a model, provider or page…"}
-            value={query}
-            onInput={(e) => setQuery((e.currentTarget as HTMLInputElement).value)}
-            onKeyDown={onKey}
-            role="combobox"
-            aria-expanded="true"
-            aria-controls="palette-list"
-            aria-activedescendant={items[index] ? `palette-${index}` : undefined}
-            aria-autocomplete="list"
-          />
-          <Kbd>esc</Kbd>
-        </div>
-        <ul ref={list} id="palette-list" role="listbox" class="max-h-[50vh] overflow-y-auto py-1">
-          {items.length === 0 ? <li class="px-4 py-6 text-center text-sm text-ink-muted">Nothing matches.</li> : null}
+    <div class="dialog" onClick={(e) => { if (e.target === e.currentTarget) props.onClose(); }}>
+      <div role="dialog" aria-modal="true" aria-label={props.mode.kind === "pick" ? props.mode.title : "Search"}>
+        <input
+          ref={input}
+          placeholder={props.mode.kind === "pick" ? props.mode.title : "Find a model, provider or page…"}
+          value={query}
+          onInput={(e) => setQuery((e.currentTarget as HTMLInputElement).value)}
+          onKeyDown={onKey}
+          role="combobox"
+          aria-expanded="true"
+          aria-controls="palette-list"
+          aria-activedescendant={items[index] ? `palette-${index}` : undefined}
+          aria-autocomplete="list"
+        />
+        <ul ref={list} id="palette-list" role="listbox">
+          {items.length === 0 ? <li class="soft" style={{ justifyContent: "center", padding: "20px 14px" }}>Nothing matches.</li> : null}
           {items.map((item, i) => {
             const header = item.group !== lastGroup ? item.group : null;
             lastGroup = item.group;
             return (
-              <li key={item.id} role="presentation">
-                {header ? <div class="border-b border-accent/30 px-4 pt-2 pb-1 text-[11px] font-bold uppercase tracking-[0.3em] text-accent">{header}</div> : null}
-                <button
-                  type="button"
+              <>
+                {header ? <li class="grp" role="presentation" key={`h:${item.group}`}>{header}</li> : null}
+                <li
+                  key={item.id}
                   id={`palette-${i}`}
                   role="option"
                   aria-selected={i === index}
                   data-index={i}
-                  class={`flex w-full items-baseline justify-between gap-3 border-b border-dotted border-line px-4 py-2 text-left text-[15px] ${i === index ? "bg-accent text-canvas" : "text-ink hover:bg-flap"}`}
                   onMouseEnter={() => setIndex(i)}
                   onClick={() => item.run()}
                 >
-                  <span class="truncate">{item.label}</span>
-                  {item.hint ? <span class={`shrink-0 truncate font-mono text-[11px] ${i === index ? "text-canvas/80" : "text-ink-muted"}`}>{item.hint}</span> : null}
-                </button>
-              </li>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.label}</span>
+                  {item.hint ? <span class="mono small soft" style={{ flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "50%" }}>{item.hint}</span> : null}
+                </li>
+              </>
             );
           })}
         </ul>
-        <div class="flex items-center gap-3 border-t border-line bg-flap px-4 py-2 text-[11px] uppercase tracking-[0.2em] text-ink-muted">
-          <span><Kbd>↑</Kbd> <Kbd>↓</Kbd> move</span>
-          <span><Kbd>↵</Kbd> open</span>
-          <span><Kbd>esc</Kbd> close</span>
+        <div class="soft small" style={{ display: "flex", gap: 14, padding: "8px 14px", borderTop: "1px solid #2c2d29" }}>
+          <span><kbd>↑</kbd> <kbd>↓</kbd> move</span>
+          <span><kbd>↵</kbd> open</span>
+          <span><kbd>esc</kbd> close</span>
         </div>
       </div>
     </div>

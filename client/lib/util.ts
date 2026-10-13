@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { useLocation } from "@spacefast/zero/client";
 
+import { longDate as sharedLongDate } from "../../shared/model";
 import { providerName } from "../../shared/providers";
 
 export const DAY = 86_400_000;
@@ -63,25 +64,27 @@ export function dayLabel(iso: string): string {
   return longDate(day);
 }
 
-/** "14 Mar 2026" from an ISO date or timestamp. Blank in, blank out. */
+/** "14 Mar 2026" from an ISO date or timestamp. Blank in, blank out. Hand-formatted so every runtime agrees. */
 export function longDate(iso: string): string {
-  if (!iso) return "";
-  const date = new Date(iso.length === 10 ? `${iso}T00:00:00Z` : iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+  return sharedLongDate(iso);
 }
+
+const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const LONG_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 /** "23 Oct": for rows already grouped under a month heading. */
 export function dayMonth(iso: string): string {
   if (!iso) return "";
   const date = new Date(iso.length === 10 ? `${iso}T00:00:00Z` : iso);
   if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleDateString(undefined, { day: "numeric", month: "short", timeZone: "UTC" });
+  return `${date.getUTCDate()} ${SHORT_MONTHS[date.getUTCMonth()]}`;
 }
 
+/** "October 2026". */
 export function monthLabel(iso: string): string {
   const date = new Date(`${iso.slice(0, 7)}-01T00:00:00Z`);
-  return date.toLocaleDateString(undefined, { month: "long", year: "numeric", timeZone: "UTC" });
+  if (Number.isNaN(date.getTime())) return iso;
+  return `${LONG_MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
 }
 
 export function clockTime(iso: string): string {

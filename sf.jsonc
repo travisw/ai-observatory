@@ -13,10 +13,10 @@
     "image": "https://ai-observatory.view.fast/og/site.png",
     "favicon": "/favicon.svg"
   },
-  // The board typeface. Loaded as a stylesheet so the compiled theme can name it.
+  // Headline, text and number typefaces. Loaded as a stylesheet so the client can name them.
   "inject": {
     "head": [
-      "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\"><link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin><link href=\"https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700&display=swap\" rel=\"stylesheet\">"
+      "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\"><link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin><link href=\"https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap\" rel=\"stylesheet\">"
     ]
   },
   // The daily market rollup runs on the platform's own scheduler; collection still runs outside.

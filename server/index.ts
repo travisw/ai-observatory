@@ -5,6 +5,7 @@ import {
   TRACKED_FIELDS,
   blendedPerMillion,
   daysBetween,
+  describeEvent,
   fingerprintOf,
   formatContext,
   longDate,
@@ -1440,6 +1441,40 @@ ${entries}
       });
     }),
 
+    /** Every page a crawler should know about. Model ids keep their slash, as the client's links do. */
+    sitemap: endpoint({ method: "GET", path: "/sitemap.xml", mode: "read" }, async (raw) => {
+      const ctx = raw as unknown as Ctx;
+      const today = now().slice(0, 10);
+      const models = await ctx.db.models.withIndex("by_active", (range) => range.eq("active", true)).take(1000);
+      const urls: { loc: string; lastmod: string }[] = [];
+      for (const path of ["/", "/changes", "/models", "/providers", "/retiring", "/status", "/index", "/records", "/graveyard", "/about", "/api", "/directory.html"]) {
+        urls.push({ loc: `${SITE}${path}`, lastmod: today });
+      }
+      const providers = new Set<string>();
+      for (const row of models) {
+        providers.add(String(row.provider).replace(/^~/, ""));
+        const changed = String(row.lastChangedAt || row.lastSeenAt || "");
+        urls.push({ loc: `${SITE}/model/${String(row.modelId)}`, lastmod: changed.length >= 10 ? changed.slice(0, 10) : today });
+      }
+      for (const slug of [...providers].sort()) urls.push({ loc: `${SITE}/provider/${slug}`, lastmod: today });
+      const body = `<?xml version="1.0" encoding="utf-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls.map((u) => `  <url><loc>${escapeXml(u.loc)}</loc><lastmod>${escapeXml(u.lastmod)}</lastmod></url>`).join("\n")}
+</urlset>
+`;
+      return text(body, { headers: { "Content-Type": "application/xml; charset=utf-8", "Cache-Control": "public, max-age=3600" } });
+    }),
+
+    /** A plain HTML listing of every model and the latest changes, for crawlers that do not run scripts. */
+    directory: endpoint({ method: "GET", path: "/directory.html", mode: "read" }, async (raw) => {
+      const ctx = raw as unknown as Ctx;
+      const models = await ctx.db.models.withIndex("by_active", (range) => range.eq("active", true)).take(1000);
+      const events = await ctx.db.events.withIndex("by_at").order("desc").take(100);
+      return text(directoryHtml(models as unknown as ModelRow[], events as unknown as ArchiveEvent[]), {
+        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=1800" },
+      });
+    }),
+
     /** Shields-style badge: `?model=anthropic/claude-haiku-4.5&metric=input|output|context|changed|retires`. */
     badge: endpoint({ method: "GET", path: "/badge.svg", mode: "read" }, async (raw, req) => {
       const ctx = raw as unknown as Ctx;
@@ -1448,21 +1483,21 @@ ${entries}
       const model = await ctx.db.models.withIndex("by_model", (range) => range.eq("modelId", id)).first();
       let label = "ai observatory";
       let value = "unknown model";
-      let color = "#8f8a7a";
+      let color = "#9a958a";
       if (model) {
         const short = modelName(String(model.modelId), String(model.name));
         if (metric === "output") {
           label = `${short} · output`;
           value = `${money(String(model.completionPrice))}/M`;
-          color = "#ffb000";
+          color = "#e0b84a";
         } else if (metric === "context") {
           label = `${short} · context`;
           value = `${formatContext(String(model.contextLength))} tokens`;
-          color = "#ffb000";
+          color = "#e0b84a";
         } else if (metric === "changed") {
           label = `${short} · last change`;
           value = model.lastChangedAt ? `${daysBetween(String(model.lastChangedAt), now())}d ago` : "never";
-          color = "#7df0a1";
+          color = "#5fcf8a";
         } else if (metric === "retires") {
           const key = canonicalKey(String(model.provider), id);
           const notices = await ctx.db.lifecycle.withIndex("by_key", (range) => range.eq("key", key)).collect();
@@ -1470,13 +1505,13 @@ ${entries}
           const when = dated ? String(dated.retiresAt) : String(model.expirationDate ?? "");
           label = `${short} · retires`;
           value = when ? (when > now().slice(0, 10) ? `in ${daysBetween(now(), when)}d` : "retired") : model.active ? "no date" : "removed";
-          color = when ? "#ff5a4a" : "#7df0a1";
+          color = when ? "#f08a6a" : "#5fcf8a";
         } else {
           label = `${short} · input`;
           value = `${money(String(model.promptPrice))}/M`;
-          color = "#ffb000";
+          color = "#e0b84a";
         }
-        if (model.active === false) color = "#ff5a4a";
+        if (model.active === false) color = "#f08a6a";
       }
       return text(badgeSvg(label, value, color), { headers: { "Content-Type": "image/svg+xml; charset=utf-8", "Cache-Control": "public, max-age=1800", "Access-Control-Allow-Origin": "*" } });
     }),
@@ -2031,6 +2066,94 @@ function escapeXml(value: string): string {
   return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 }
 
+/** The crawlable directory page: one table per provider, then the latest changes as a list. */
+function directoryHtml(models: ModelRow[], events: ArchiveEvent[]): string {
+  const byProvider = new Map<string, ModelRow[]>();
+  for (const m of models) {
+    const slug = String(m.provider).replace(/^~/, "");
+    const list = byProvider.get(slug);
+    if (list) list.push(m);
+    else byProvider.set(slug, [m]);
+  }
+  const providers = [...byProvider.keys()].sort((a, b) => providerName(a).localeCompare(providerName(b)));
+  const names = new Map(models.map((m) => [m.modelId, m.name]));
+  const sections = providers
+    .map((slug) => {
+      const rows = byProvider
+        .get(slug)!
+        .sort((a, b) => a.modelId.localeCompare(b.modelId))
+        .map(
+          (m) => `<tr>
+<td><a href="/model/${escapeXml(m.modelId)}">${escapeXml(modelName(m.modelId, m.name))}</a></td>
+<td class="id">${escapeXml(m.modelId)}</td>
+<td class="n">${escapeXml(money(m.promptPrice) || "—")}</td>
+<td class="n">${escapeXml(money(m.completionPrice) || "—")}</td>
+<td class="n">${escapeXml(formatContext(m.contextLength))}</td>
+<td class="n">${escapeXml(m.lastChangedAt ? longDate(m.lastChangedAt) : "never")}</td>
+</tr>`,
+        )
+        .join("\n");
+      return `<h2 id="${escapeXml(slug)}"><a href="/provider/${escapeXml(slug)}">${escapeXml(providerName(slug))}</a> <small>${byProvider.get(slug)!.length}</small></h2>
+<table>
+<thead><tr><th>Model</th><th>Id</th><th class="n">Input $/M</th><th class="n">Output $/M</th><th class="n">Context</th><th class="n">Last changed</th></tr></thead>
+<tbody>
+${rows}
+</tbody>
+</table>`;
+    })
+    .join("\n");
+  const changes = events
+    .map((e) => {
+      const name = modelName(e.modelId, names.get(e.modelId));
+      return `<li><span class="n">${escapeXml(longDate(e.at))}</span> <a href="/model/${escapeXml(e.modelId)}">${escapeXml(name)}</a> ${escapeXml(describeEvent(e.kind, e.field, e.oldValue, e.newValue))}</li>`;
+    })
+    .join("\n");
+  const description = `Every AI model listed on OpenRouter with its current price and context window, ${models.length} models from ${providers.length} providers, plus the latest recorded changes.`;
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Observatory directory</title>
+<meta name="description" content="${escapeXml(description)}">
+<link rel="canonical" href="${SITE}/directory.html">
+<link rel="icon" href="/favicon.svg">
+<style>
+body{margin:0;background:#111210;color:#ece9e0;font:14px/1.5 'IBM Plex Sans',system-ui,sans-serif}
+main{max-width:1120px;margin:0 auto;padding:24px 16px 48px}
+a{color:#9fb3ff;text-decoration:none}a:hover{text-decoration:underline}
+h1{font-size:28px;margin:0 0 8px}h2{font-size:16px;margin:28px 0 8px;text-transform:uppercase;letter-spacing:.06em}
+h2 small{color:#9a958a;font-weight:400;letter-spacing:0;text-transform:none}
+p{color:#9a958a;max-width:66ch}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#9a958a;text-align:left;font-weight:600;padding:8px 10px 6px 0;border-bottom:2px solid #ece9e0}
+td{padding:6px 10px 6px 0;border-bottom:1px solid #2c2d29;vertical-align:baseline}
+td:last-child,th:last-child{padding-right:0}
+.n{text-align:right;font-family:'IBM Plex Mono',SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums;white-space:nowrap}
+.id{color:#9a958a;font-family:'IBM Plex Mono',SFMono-Regular,Menlo,monospace;font-size:12px}
+ol{padding-left:20px}ol li{padding:4px 0;border-bottom:1px solid #2c2d29}
+ol .n{color:#9a958a;font-size:12px;margin-right:8px}
+nav{font-size:12px;color:#9a958a;margin-bottom:16px}
+</style>
+</head>
+<body>
+<main>
+<nav><a href="/">AI Observatory</a> · directory</nav>
+<h1>AI Observatory directory</h1>
+<p>${escapeXml(description)} Prices are per million tokens as listed on OpenRouter. Every listing is checked every half hour and every change is kept; each model's page has its full history.</p>
+<p>Jump to: ${providers.map((slug) => `<a href="#${escapeXml(slug)}">${escapeXml(providerName(slug))}</a>`).join(" · ")}</p>
+${sections}
+<h2 id="changes">Latest changes</h2>
+<ol>
+${changes}
+</ol>
+<p><a href="/">Back to the front page</a> · <a href="/feed.xml">Feed</a> · <a href="/api">API</a></p>
+</main>
+</body>
+</html>
+`;
+}
+
 function csvCell(value: unknown): string {
   const s = String(value ?? "");
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -2044,10 +2167,10 @@ function badgeSvg(label: string, value: string, color: string): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${lw + vw}" height="20" role="img" aria-label="${escapeXml(label)}: ${escapeXml(value)}">
 <title>${escapeXml(label)}: ${escapeXml(value)}</title>
 <clipPath id="r"><rect width="${lw + vw}" height="20" rx="3" fill="#fff"/></clipPath>
-<g clip-path="url(#r)"><rect width="${lw}" height="20" fill="#1f1f1f"/><rect x="${lw}" width="${vw}" height="20" fill="${color}"/></g>
+<g clip-path="url(#r)"><rect width="${lw}" height="20" fill="#2c2d29"/><rect x="${lw}" width="${vw}" height="20" fill="${color}"/></g>
 <g text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11">
-<text x="${lw / 2}" y="14" fill="#f3e9cf">${escapeXml(label)}</text>
-<text x="${lw + vw / 2}" y="14" fill="#090909" font-weight="bold">${escapeXml(value)}</text>
+<text x="${lw / 2}" y="14" fill="#ece9e0">${escapeXml(label)}</text>
+<text x="${lw + vw / 2}" y="14" fill="#111210" font-weight="bold">${escapeXml(value)}</text>
 </g></svg>`;
 }
 
@@ -2055,14 +2178,14 @@ function badgeSvg(label: string, value: string, color: string): string {
 function card(title: string, line: string, sub: string, footer: string) {
   const element = h(
     "div",
-    { tw: "flex flex-col w-full h-full p-16 justify-between", style: { backgroundColor: "#090909", color: "#f3e9cf" } },
+    { tw: "flex flex-col w-full h-full p-16 justify-between", style: { backgroundColor: "#111210", color: "#ece9e0" } },
     h("div", { tw: "flex flex-col" },
-      h("div", { tw: "text-3xl mb-6 font-bold", style: { color: "#ffb000", letterSpacing: "0.3em" } }, "AI OBSERVATORY"),
-      h("div", { tw: "text-6xl font-bold leading-tight uppercase" }, title.length > 90 ? `${title.slice(0, 87)}…` : title),
-      line ? h("div", { tw: "text-3xl mt-6", style: { color: "#8f8a7a" } }, line.length > 110 ? `${line.slice(0, 107)}…` : line) : null,
+      h("div", { tw: "text-3xl mb-6 font-bold", style: { color: "#9fb3ff", letterSpacing: "0.02em" } }, "AI OBSERVATORY"),
+      h("div", { tw: "text-6xl font-bold leading-tight" }, title.length > 90 ? `${title.slice(0, 87)}…` : title),
+      line ? h("div", { tw: "text-3xl mt-6", style: { color: "#9a958a" } }, line.length > 110 ? `${line.slice(0, 107)}…` : line) : null,
       sub ? h("div", { tw: "text-3xl mt-3" }, sub.length > 110 ? `${sub.slice(0, 107)}…` : sub) : null
     ),
-    h("div", { tw: "flex justify-between text-2xl", style: { color: "#8f8a7a" } },
+    h("div", { tw: "flex justify-between text-2xl", style: { color: "#9a958a" } },
       h("div", {}, footer),
       h("div", {}, "ai-observatory.view.fast")
     )

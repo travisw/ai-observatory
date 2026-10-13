@@ -1,5 +1,5 @@
 /**
- * Up to four models side by side: the spec board with the best cell lit green, overlaid price
+ * Up to four models side by side: the spec table with the best cell in green, overlaid price
  * history, and one merged timeline.
  */
 import { useMemo } from "preact/hooks";
@@ -8,29 +8,26 @@ import { useNavigate, useQuery } from "@spacefast/zero/client";
 import { formatContext, money } from "../../shared/model";
 import { modelName, providerName } from "../../shared/providers";
 import type { CompareData, ModelRow } from "../../shared/types";
-import { Board, ColumnHeads, FlapRow, Sign, type FlapColumn } from "../components/Flap";
-import { BoardEmpty, LogSection, Marquee, PageSkeleton, Plaque, StoryLine } from "../components/Log";
 import { StepChart, type StepSeries } from "../components/StepChart";
-import { boardDate, boardPct, shortName } from "../lib/board";
+import { Chip, Empty, PageHead, Section, Skeleton, StoryRow, StoryTable } from "../components/Wire";
 import { openPalette } from "../lib/palette";
 import { stepSeries } from "../lib/series";
 import { assembleStories, keyIndex, nameIndex, storyHref } from "../lib/stories";
-import { DAY, compareHref, isLoading, longDate, modelHref, pctChange, usePageTitle, useSearchParams } from "../lib/util";
+import { dayYear, pct, shortName } from "../lib/text";
+import { DAY, compareHref, isLoading, modelHref, pctChange, usePageTitle, useSearchParams } from "../lib/util";
 
 type Spec = { label: string; value: (m: ModelRow) => number | null; show: (m: ModelRow) => string; lowerIsBetter: boolean; gap: boolean };
 
 const SPECS: Spec[] = [
   { label: "Input $/M", value: (m) => (m.promptPrice ? Number(m.promptPrice) * 1e6 : null), show: (m) => money(m.promptPrice), lowerIsBetter: true, gap: true },
   { label: "Output $/M", value: (m) => (m.completionPrice ? Number(m.completionPrice) * 1e6 : null), show: (m) => money(m.completionPrice), lowerIsBetter: true, gap: true },
-  { label: "Cache $/M", value: (m) => (m.cacheReadPrice ? Number(m.cacheReadPrice) * 1e6 : null), show: (m) => (m.cacheReadPrice ? money(m.cacheReadPrice) : "-"), lowerIsBetter: true, gap: true },
+  { label: "Cache $/M", value: (m) => (m.cacheReadPrice ? Number(m.cacheReadPrice) * 1e6 : null), show: (m) => (m.cacheReadPrice ? money(m.cacheReadPrice) : "—"), lowerIsBetter: true, gap: true },
   { label: "Context", value: (m) => Number(m.contextLength) || null, show: (m) => formatContext(m.contextLength), lowerIsBetter: false, gap: true },
-  { label: "Max out", value: (m) => Number(m.maxCompletion) || null, show: (m) => formatContext(m.maxCompletion), lowerIsBetter: false, gap: true },
-  { label: "Index", value: (m) => (m.aaIntelligence ? Number(m.aaIntelligence) : null), show: (m) => m.aaIntelligence || "-", lowerIsBetter: false, gap: true },
-  { label: "Listed", value: (m) => Date.parse(m.firstSeenAt) || null, show: (m) => boardDate(m.firstSeenAt) + " " + m.firstSeenAt.slice(0, 4), lowerIsBetter: false, gap: false },
+  { label: "Max output", value: (m) => Number(m.maxCompletion) || null, show: (m) => formatContext(m.maxCompletion), lowerIsBetter: false, gap: true },
+  { label: "Capability index", value: (m) => (m.aaIntelligence ? Number(m.aaIntelligence) : null), show: (m) => m.aaIntelligence || "—", lowerIsBetter: false, gap: true },
+  { label: "Listed", value: (m) => Date.parse(m.firstSeenAt) || null, show: (m) => dayYear(m.firstSeenAt), lowerIsBetter: false, gap: false },
   { label: "Changes", value: (m) => Number(m.changeCount) || 0, show: (m) => m.changeCount || "0", lowerIsBetter: true, gap: false },
 ];
-
-const COL = 14;
 
 export function ComparePage() {
   usePageTitle("Compare");
@@ -55,61 +52,80 @@ export function ComparePage() {
   const earliest = Math.min(...series.flatMap((s) => s.points.map((p) => p.t)), Date.now() - DAY);
 
   return (
-    <div class="flex flex-col gap-8">
-      <Marquee title="Compare" action={ids.length < 4 ? <Sign onClick={pick}>+ Add a model</Sign> : undefined}>
-        Up to four models side by side. The best value in each row is lit green; the others say how far behind they are.
-      </Marquee>
+    <div class="stack">
+      <PageHead title="Compare" action={ids.length < 4 ? <Chip onClick={pick}>+ Add a model</Chip> : undefined}>
+        Up to four models side by side. The best value in each row is green; the others say how far behind they are.
+      </PageHead>
 
-      <div class="flex flex-wrap items-center gap-1.5">
+      <div class="chips">
         {models.map((m) => (
-          <span key={m.modelId} class="inline-flex items-center gap-1">
-            <Sign to={modelHref(m.modelId)}>{providerName(m.provider)} {shortName(m.modelId, m.name)}</Sign>
-            <Sign onClick={() => remove(m.modelId)} ariaLabel={`Remove ${m.name}`}>×</Sign>
+          <span key={m.modelId} style={{ display: "inline-flex", gap: 4 }}>
+            <Chip to={modelHref(m.modelId)}>{providerName(m.provider)} {shortName(m.modelId, m.name)}</Chip>
+            <Chip onClick={() => remove(m.modelId)} ariaLabel={`Remove ${m.name}`}>×</Chip>
           </span>
         ))}
-        {ids.length === 0 ? <Sign onClick={pick} active>Choose a model</Sign> : null}
+        {ids.length === 0 ? <Chip onClick={pick} active>Choose a model</Chip> : null}
       </div>
 
-      {ids.length > 0 && loading ? <PageSkeleton /> : null}
+      {ids.length > 0 && loading ? <Skeleton /> : null}
       {ids.length === 0 ? (
-        <BoardEmpty>Pick two or more models to start</BoardEmpty>
+        <Empty>Pick two or more models to start.</Empty>
       ) : models.length === 0 && !loading ? (
-        <BoardEmpty>None of those ids are tracked</BoardEmpty>
+        <Empty>None of those ids are tracked.</Empty>
       ) : models.length ? (
         <>
-          <Board label="Side by side" hint="best in each row lit green">
-            <ColumnHeads columns={[{ label: "Spec", width: 10, sticky: true }, ...models.map((m) => ({ label: shortName(m.modelId, m.name), width: COL }))]} />
-            {SPECS.map((spec, i) => {
-              const values = models.map((m) => spec.value(m));
-              const known = values.filter((v): v is number => v !== null);
-              const best = known.length > 1 ? (spec.lowerIsBetter ? Math.min(...known) : Math.max(...known)) : null;
-              const columns: FlapColumn[] = [{ text: spec.label, width: 10, sticky: true, tone: "muted" }];
-              const words: string[] = [];
-              models.forEach((m, j) => {
-                const v = values[j];
-                const isBest = best !== null && v === best;
-                const gap = best !== null && v !== null && !isBest && spec.gap ? pctChange(best, v) : null;
-                const gapText = gap !== null && Math.abs(gap) >= 1 ? (Math.abs(gap) > 300 ? ` ${Math.round(Math.abs(gap) / 100 + 1)}X` : ` ${boardPct(gap).replace(/[▲▼] /, "")}`) : "";
-                columns.push({ text: `${spec.show(m)}${gapText}`, width: COL, tone: isBest ? "success" : gap !== null && Math.abs(gap) >= 1 ? "warning" : "ink" });
-                words.push(`${shortName(m.modelId, m.name)} ${spec.show(m)}${isBest ? " (best)" : gapText ? ` (${gapText.trim()} ${spec.lowerIsBetter ? "more" : "less"})` : ""}`);
-              });
-              return <FlapRow key={spec.label} label={`${spec.label}: ${words.join("; ")}`} delay={i * 40} columns={columns} />;
-            })}
-          </Board>
+          <Section title="Side by side" hint="best in each row in green">
+            <div class="tw">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Spec</th>
+                    {models.map((m) => <th key={m.modelId} class="n">{shortName(m.modelId, m.name)}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {SPECS.map((spec) => {
+                    const values = models.map((m) => spec.value(m));
+                    const known = values.filter((v): v is number => v !== null);
+                    const best = known.length > 1 ? (spec.lowerIsBetter ? Math.min(...known) : Math.max(...known)) : null;
+                    return (
+                      <tr key={spec.label}>
+                        <td class="soft">{spec.label}</td>
+                        {models.map((m, j) => {
+                          const v = values[j];
+                          const isBest = best !== null && v === best;
+                          const gap = best !== null && v !== null && !isBest && spec.gap ? pctChange(best, v) : null;
+                          const behind = gap !== null && Math.abs(gap) >= 1;
+                          return (
+                            <td key={m.modelId} class={`n ${isBest ? "cut" : behind ? "rise" : ""}`}>
+                              {spec.show(m)}
+                              {behind ? <span class="soft small" title={`${pct(gap).replace(/^[+−]/, "")} ${spec.lowerIsBetter ? "more" : "less"} than the best`}> {pct(gap).replace(/^[+−]/, "")}</span> : null}
+                              {isBest ? <span class="soft small"> best</span> : null}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Section>
 
-          <LogSection title="Input price history" hint="$ per million tokens">
-            <StepChart series={series} from={earliest} />
-          </LogSection>
-          <LogSection title="What changed" hint="all of them, newest first">
-            {stories.length === 0 ? <BoardEmpty>No changes recorded</BoardEmpty> : (
-              <ul>{stories.filter((s) => s.kind !== "drift").slice(0, 60).map((s) => <StoryLine key={s.key} story={s} href={storyHref(s, keys)} date />)}</ul>
+          <Section title="Input price history" hint="$ per million tokens">
+            <div class="box"><StepChart series={series} from={earliest} /></div>
+          </Section>
+          <Section title="What changed" hint="all of them, newest first">
+            {stories.length === 0 ? <Empty>No changes recorded.</Empty> : (
+              <StoryTable label="Changes to the compared models">
+                {stories.filter((s) => s.kind !== "drift").slice(0, 60).map((s) => <StoryRow key={s.key} story={s} href={storyHref(s, keys)} date />)}
+              </StoryTable>
             )}
-          </LogSection>
-          <Plaque>
-            <span class="text-[11px] font-bold uppercase tracking-[0.3em] text-accent">Share this comparison</span>
-            <span class="ml-3 break-all font-mono text-xs text-ink">{`https://ai-observatory.view.fast${compareHref(ids)}`}</span>
-            <span class="ml-3 text-xs text-ink-muted">Listed {models.map((m) => `${shortName(m.modelId, m.name)} ${longDate(m.firstSeenAt)}`).join(" · ")}</span>
-          </Plaque>
+          </Section>
+          <p class="note">
+            Share this comparison: <code class="mono" style={{ wordBreak: "break-all" }}>{`https://ai-observatory.view.fast${compareHref(ids)}`}</code>
+            <br />Listed {models.map((m) => `${shortName(m.modelId, m.name)} ${dayYear(m.firstSeenAt)}`).join(" · ")}
+          </p>
         </>
       ) : null}
     </div>

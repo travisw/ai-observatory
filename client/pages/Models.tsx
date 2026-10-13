@@ -1,6 +1,6 @@
 /**
- * The catalogue: the sky tonight on top (every scored model as a star), the full logbook table
- * beneath, sortable and filterable, with a sparkline per row.
+ * The catalogue: price vs capability on top, the full table beneath, sortable and filterable,
+ * with a sparkline per row.
  */
 import { useMemo } from "preact/hooks";
 import { Link, useNavigate, useQuery } from "@spacefast/zero/client";
@@ -9,11 +9,10 @@ import { Sparkline } from "@spacefast/zero/charts";
 import { formatContext, money } from "../../shared/model";
 import { isAlias, providerName } from "../../shared/providers";
 import type { ArchiveEvent, HostsOverviewRow, ModelRow } from "../../shared/types";
-import { Board, Sign } from "../components/Flap";
-import { BoardEmpty, LogSection, Marquee, PageSkeleton, SignInput, SignSelect, Stencil } from "../components/Log";
 import { StarChart } from "../components/StarChart";
-import { shortName } from "../lib/board";
+import { Chip, Empty, PageHead, Section, Select, Skeleton, TextInput } from "../components/Wire";
 import { inputSpark } from "../lib/series";
+import { shortName } from "../lib/text";
 import { isLoading, longDate, modelHref, plural, usePageTitle, useSearchParams, useSince } from "../lib/util";
 import { matchesWatchModel, useWatchlist } from "../lib/watch";
 
@@ -86,74 +85,72 @@ export function ModelsPage() {
       });
   }, [active, retired, retiredOn, provider, watchOnly, watchlist, needle, sort]);
 
-  if (isLoading(active)) return <PageSkeleton />;
+  if (isLoading(active)) return <Skeleton rows={10} />;
 
-  const skyModels = (active ?? []).filter((m) => !provider || m.provider.replace(/^~/, "") === provider);
+  const chartModels = (active ?? []).filter((m) => !provider || m.provider.replace(/^~/, "") === provider);
 
   return (
-    <div class="flex flex-col gap-8">
-      <Marquee title="Models" action={<Sign href="/api/models.json">JSON</Sign>}>
+    <div class="stack">
+      <PageHead title="Models" action={<Chip href="/api/models.json">JSON</Chip>}>
         {plural((active ?? []).length, "model")} listed right now. Prices per million tokens as listed on OpenRouter.
-      </Marquee>
+      </PageHead>
 
-      <Board label="The sky tonight" hint="every scored model: capability across, input price up, size is context" action={provider ? <Sign to="/models">Whole sky</Sign> : undefined}>
-        <div class="p-3">
-          <StarChart models={skyModels} title="The sky tonight" />
-        </div>
-      </Board>
+      <Section title="Price vs capability" hint="every scored model" action={provider ? <Chip to="/models">Every provider</Chip> : undefined}>
+        <StarChart models={chartModels} title={provider ? `Price vs capability · ${providerName(provider)}` : "Price vs capability"} />
+      </Section>
 
-      <LogSection
+      <Section
         title="The catalogue"
         hint={`${plural(rows.length, "model")} shown`}
         action={
           <>
-            <SignInput value={q} onInput={(v) => set("q", v)} placeholder="Filter by model or provider" label="Filter models" class="w-56" />
-            <SignSelect value={provider} onChange={(v) => set("provider", v)} label="Provider">
+            <TextInput value={q} onInput={(v) => set("q", v)} placeholder="Filter by model or provider" label="Filter models" style={{ width: 220 }} />
+            <Select value={provider} onChange={(v) => set("provider", v)} label="Provider">
               <option value="">Every provider</option>
               {providers.map((p) => <option key={p} value={p}>{providerName(p)}</option>)}
-            </SignSelect>
-            <Stencil active={retiredOn} onClick={() => set("retired", retiredOn ? "" : "1")}>Delisted {(retired ?? []).length}</Stencil>
-            {watchlist.length ? <Stencil active={watchOnly} onClick={() => set("watch", watchOnly ? "" : "1")}>Watching {watchlist.length}</Stencil> : null}
+            </Select>
+            <Chip active={retiredOn} onClick={() => set("retired", retiredOn ? "" : "1")}>Removed {(retired ?? []).length}</Chip>
+            {watchlist.length ? <Chip active={watchOnly} onClick={() => set("watch", watchOnly ? "" : "1")}>Watching {watchlist.length}</Chip> : null}
           </>
         }
       >
         {rows.length === 0 ? (
-          <BoardEmpty>Nothing matches. Try a shorter filter.</BoardEmpty>
+          <Empty>Nothing matches. Try a shorter filter.</Empty>
         ) : (
-          <div class="overflow-x-auto">
-            <table class="w-full text-sm">
+          <div class="tw">
+            <table>
               <thead>
-                <tr class="border-b border-accent/40 text-left text-[11px] uppercase tracking-[0.2em] text-ink-muted">
+                <tr>
                   {SORTS.map((s) => (
-                    <th key={s.key} class={`py-2 pr-3 font-semibold ${s.key === "model" ? "sticky left-0 bg-canvas" : ""} ${s.align === "right" ? "text-right" : ""}`}>
-                      <button type="button" class={`uppercase tracking-[0.2em] hover:text-ink ${sort === s.key ? "text-accent" : ""}`} onClick={() => set("sort", s.key)} aria-sort={sort === s.key ? "descending" : undefined}>
+                    <th key={s.key} class={s.align === "right" ? "n" : undefined} aria-sort={sort === s.key ? "descending" : undefined}>
+                      <button type="button" class="chip" style={{ border: 0, padding: 0, font: "inherit", letterSpacing: "inherit", textTransform: "inherit", color: sort === s.key ? "var(--fg)" : "var(--soft)" }} onClick={() => set("sort", s.key)}>
                         {s.label}{sort === s.key ? " ▾" : ""}
                       </button>
                     </th>
                   ))}
-                  <th class="py-2 pr-3 font-semibold">90 days</th>
-                  <th class="py-2 font-semibold">Cheapest host</th>
+                  <th>90 days</th>
+                  <th>Cheapest host</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((m) => {
                   const host = hostIndex.get(m.modelId);
                   return (
-                    <tr key={m.id} class={`border-b border-dotted border-line last:border-0 ${m.active ? "" : "opacity-50"}`}>
-                      <td class="sticky left-0 bg-canvas py-1.5 pr-3">
-                        <Link to={modelHref(m.modelId)} class="text-[15px] text-ink hover:text-accent">
-                          <span class="text-ink-muted">{providerName(m.provider)} </span>{shortName(m.modelId, m.name)}
+                    <tr key={m.id} class={m.active ? undefined : "dim"}>
+                      <td>
+                        <Link to={modelHref(m.modelId)} class="hl">
+                          <span class="soft">{providerName(m.provider)} </span>{shortName(m.modelId, m.name)}
                         </Link>
-                        {isAlias(m.modelId) ? <span class="ml-2 text-[10px] uppercase tracking-[0.2em] text-ink-muted">alias</span> : null}
+                        {isAlias(m.modelId) ? <span class="tag">alias</span> : null}
                       </td>
-                      <td class="py-1.5 pr-3 text-right font-mono text-xs tabular-nums text-ink-muted">{formatContext(m.contextLength)}</td>
-                      <td class="py-1.5 pr-3 text-right font-mono text-xs tabular-nums text-ink">{money(m.promptPrice)}</td>
-                      <td class="py-1.5 pr-3 text-right font-mono text-xs tabular-nums text-ink">{money(m.completionPrice)}</td>
-                      <td class="py-1.5 pr-3 text-right font-mono text-xs tabular-nums text-ink-muted">{m.aaIntelligence || "–"}</td>
-                      <td class="py-1.5 pr-3 text-right font-mono text-xs tabular-nums text-ink-muted">{m.changeCount || "0"}</td>
-                      <td class="py-1.5 pr-3 text-right font-mono text-xs tabular-nums text-ink-muted">{longDate(m.firstSeenAt)}</td>
-                      <td class="py-1.5 pr-3"><Sparkline values={inputSpark(m, events ?? [])} width={64} height={18} color="#ffb000" /></td>
-                      <td class="py-1.5 text-xs text-ink-muted">{host ? `${host.cheapestHost} · ${money(host.cheapestIn)}${Number(host.hosts) > 1 ? ` of ${host.hosts}` : ""}` : "–"}</td>
+                      <td class="n soft">{formatContext(m.contextLength)}</td>
+                      <td class="n">{money(m.promptPrice)}</td>
+                      <td class="n">{money(m.completionPrice)}</td>
+                      <td class="n soft">{m.aaIntelligence || "–"}</td>
+                      <td class="n soft">{m.changeCount || "0"}</td>
+                      <td class="n soft when">{longDate(m.firstSeenAt)}</td>
+                      <td><Sparkline values={inputSpark(m, events ?? [])} width={64} height={18} color="#9fb3ff" /></td>
+                      <td class="small soft">{host ? `${host.cheapestHost} · ${money(host.cheapestIn)}${Number(host.hosts) > 1 ? ` of ${host.hosts}` : ""}` : "–"}</td>
                     </tr>
                   );
                 })}
@@ -161,11 +158,11 @@ export function ModelsPage() {
             </table>
           </div>
         )}
-        <p class="text-xs text-ink-muted">
+        <p class="note" style={{ marginTop: 10 }}>
           "Index" is the Artificial Analysis intelligence index OpenRouter publishes for each model; higher is more capable. The sparkline is the input price over 90 days.
-          {" "}<Link to="/compare" class="text-accent hover:underline">Compare models side by side</Link>.
+          {" "}<Link to="/compare" class="acc">Compare models side by side</Link>.
         </p>
-      </LogSection>
+      </Section>
     </div>
   );
 }

@@ -1,14 +1,13 @@
 /**
  * A step chart for prices and limits. Prices are step functions: a sloped line between two
  * points draws a change that never happened. recharts is served by the platform, no install.
- * Styled like the hall: black plot, cream and amber strokes, dotted rails, condensed labels.
  */
 import recharts from "recharts";
 
-import { BOARD_FONT } from "./Flap";
-import { CHART_STROKES } from "../lib/board";
+import { FONT_MONO } from "./Wire";
 import type { StepPoint } from "../lib/series";
 import { valueAt } from "../lib/series";
+import { CHART_STROKES } from "../lib/text";
 import { DAY } from "../lib/util";
 
 // The platform serves recharts as one default export rather than named exports.
@@ -16,8 +15,8 @@ const { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContain
 
 export type StepSeries = { key: string; label: string; points: StepPoint[]; dashed?: boolean; color?: string };
 
-export const AXIS_TICK = { fontSize: 12, fontFamily: BOARD_FONT, fill: "#8f8a7a", letterSpacing: "0.08em" };
-export const TOOLTIP_STYLE = { background: "#090909", border: "1px solid #2a2a2a", borderRadius: 2, fontSize: 12, fontFamily: BOARD_FONT, letterSpacing: "0.05em", textTransform: "uppercase" as const };
+export const AXIS_TICK = { fontSize: 11, fontFamily: FONT_MONO, fill: "#9a958a" };
+export const TOOLTIP_STYLE = { background: "#1a1b18", border: "1px solid #2c2d29", borderRadius: 3, fontSize: 12, fontFamily: FONT_MONO, color: "#ece9e0" };
 
 export function fmtMoney(v: number): string {
   if (v >= 100) return `$${v.toFixed(0)}`;
@@ -26,7 +25,7 @@ export function fmtMoney(v: number): string {
   return `$${v.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}`;
 }
 
-const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function fmtDate(t: number, spanDays: number): string {
   const d = new Date(t);
@@ -72,24 +71,24 @@ export function StepChart(props: {
     .filter(Boolean)
     .join("; ");
   return (
-    <div class="w-full rounded-sm bg-canvas p-2" style={{ height: `${props.height ?? 260}px` }} role="img" aria-label={`Chart. ${summary}`}>
+    <div class="box" style={{ height: `${props.height ?? 260}px`, padding: "8px 4px 4px" }} role="img" aria-label={`Chart. ${summary}`}>
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={rows} margin={{ top: 12, right: 16, left: 4, bottom: 4 }}>
-          <CartesianGrid stroke="#2a2a2a" strokeDasharray="1 5" vertical={false} />
+          <CartesianGrid stroke="#2c2d29" strokeDasharray="2 3" vertical={false} />
           <XAxis
             dataKey="t"
             type="number"
             domain={[props.from, to]}
             tickFormatter={(t: number) => fmtDate(t, spanDays)}
-            stroke="#2a2a2a"
+            stroke="#2c2d29"
             tick={AXIS_TICK}
             tickLine={false}
-            axisLine={{ stroke: "#2a2a2a" }}
+            axisLine={{ stroke: "#2c2d29" }}
             minTickGap={48}
           />
           <YAxis
             tickFormatter={(v: number) => fmt(v)}
-            stroke="#2a2a2a"
+            stroke="#2c2d29"
             tick={AXIS_TICK}
             tickLine={false}
             axisLine={false}
@@ -100,13 +99,13 @@ export function StepChart(props: {
             labelFormatter={(t: number) => new Date(t).toISOString().replace("T", " ").slice(0, 16) + " UTC"}
             formatter={(v: number, name: string) => [fmt(v), name]}
             contentStyle={TOOLTIP_STYLE}
-            labelStyle={{ color: "#8f8a7a" }}
-            itemStyle={{ color: "#f3e9cf" }}
-            cursor={{ stroke: "#ffb000", strokeDasharray: "2 3" }}
+            labelStyle={{ color: "#9a958a" }}
+            itemStyle={{ color: "#ece9e0" }}
+            cursor={{ stroke: "#9fb3ff", strokeDasharray: "2 3" }}
           />
-          {props.series.length > 1 ? <Legend wrapperStyle={{ fontSize: 12, fontFamily: BOARD_FONT, letterSpacing: "0.08em", textTransform: "uppercase" }} /> : null}
+          {props.series.length > 1 ? <Legend wrapperStyle={{ fontSize: 12, fontFamily: FONT_MONO, color: "#9a958a" }} /> : null}
           {props.lowLine ? (
-            <ReferenceLine y={props.lowLine.value} stroke="#7df0a1" strokeDasharray="4 4" label={{ value: props.lowLine.label.toUpperCase(), position: "insideTopRight", fill: "#7df0a1", fontSize: 11, fontFamily: BOARD_FONT, letterSpacing: "0.08em" }} />
+            <ReferenceLine y={props.lowLine.value} stroke="#5fcf8a" strokeDasharray="4 4" label={{ value: props.lowLine.label, position: "insideTopRight", fill: "#5fcf8a", fontSize: 11, fontFamily: FONT_MONO }} />
           ) : null}
           {props.series.map((s, i) => (
             <Line
@@ -136,21 +135,21 @@ export function StepTable(props: { series: StepSeries[]; formatValue?: (v: numbe
   for (const s of props.series) for (const p of s.points) times.add(p.t);
   const rows = [...times].sort((a, b) => b - a);
   return (
-    <div class="overflow-x-auto">
-      <table class="w-full font-mono text-xs tabular-nums">
+    <div class="tw">
+      <table>
         <thead>
-          <tr class="border-b border-accent/40 text-left text-[11px] uppercase tracking-[0.2em] text-ink-muted">
-            <th class="py-1 pr-3 font-normal">when (UTC)</th>
-            {props.series.map((s) => <th key={s.key} class="py-1 pr-3 font-normal">{s.label}</th>)}
+          <tr>
+            <th>When (UTC)</th>
+            {props.series.map((s) => <th key={s.key} class="n">{s.label}</th>)}
           </tr>
         </thead>
         <tbody>
           {rows.map((t) => (
-            <tr key={t} class="border-b border-dotted border-line last:border-0">
-              <td class="py-1 pr-3 text-ink-muted">{new Date(t).toISOString().replace("T", " ").slice(0, 16)}</td>
+            <tr key={t}>
+              <td class="when">{new Date(t).toISOString().replace("T", " ").slice(0, 16)}</td>
               {props.series.map((s) => {
                 const v = valueAt(s.points, t);
-                return <td key={s.key} class="py-1 pr-3 text-ink">{v === null ? "–" : fmt(v)}</td>;
+                return <td key={s.key} class="n">{v === null ? "–" : fmt(v)}</td>;
               })}
             </tr>
           ))}
