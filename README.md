@@ -33,7 +33,7 @@ keeps its history, and a notice that disappears from a deprecation page is recor
 - **Per-model pages** with step charts of every price, hosts and their markup, first-party
   listings side by side, lifecycle notices, and the full timeline.
 - **Provider pages**, **compare**, **status with 90-day history**, a **retirement calendar**, the
-  **graveyard**, a **records board**, a daily **token price index**, and a **time machine** that
+  **graveyard**, a **records page**, a daily **token price index**, and a **time machine** that
   rebuilds the catalogue as of any date.
 - **Feeds and data.** `/feed.xml` (Atom, filterable with `?watch=claude,deepseek`), JSON at
   `/api/*.json`, CSV at `/export/changes.csv`, badges at `/badge.svg?model=…`, share cards at

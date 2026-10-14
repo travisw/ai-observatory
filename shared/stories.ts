@@ -106,6 +106,23 @@ function listDiff(oldValue: string, newValue: string): string {
   return parts.join(" · ");
 }
 
+/** "gained 7 parameters, temperature and top_p among them": a headline-length version of `listDiff`. */
+function shortListDiff(oldValue: string, newValue: string, noun: string): string {
+  const before = new Set(oldValue.split(",").filter(Boolean));
+  const after = new Set(newValue.split(",").filter(Boolean));
+  const gained = [...after].filter((x) => !before.has(x));
+  const lost = [...before].filter((x) => !after.has(x));
+  const phrase = (verb: string, items: string[]) => {
+    if (items.length === 1) return `${verb} the ${items[0]} ${noun}`;
+    if (items.length <= 3) return `${verb} the ${items.join(", ")} ${noun}s`;
+    return `${verb} ${items.length} ${noun}s, ${items[0]} and ${items[1]} among them`;
+  };
+  const parts: string[] = [];
+  if (gained.length) parts.push(phrase("gained", gained));
+  if (lost.length) parts.push(phrase("lost", lost));
+  return parts.join(" and ");
+}
+
 /** The slug after the slash, for a target id we may not have a display name for. */
 function slugName(modelId: string, names: Map<string, string>): string {
   return modelName(modelId, names.get(modelId));
@@ -285,7 +302,7 @@ function buildStory(events: ArchiveEvent[], names: Map<string, string>): Story {
     if (score < 15) {
       kind = "capabilities";
       score = 15;
-      headline = `${model} ${diff || "changed parameters"}`;
+      headline = `${model} ${shortListDiff(params.oldValue, params.newValue, "parameter") || "changed parameters"}`;
     }
   }
 

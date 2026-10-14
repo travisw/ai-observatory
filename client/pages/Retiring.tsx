@@ -84,8 +84,7 @@ export function RetiringPage() {
 
       {next ? (
         <div class="stats">
-          <Stat value={next.model} label={`next to retire · ${providerName(next.provider)}`} href={next.href ?? undefined} />
-          <Stat value={`${daysUntil(next.retiresAt)} days`} label={`until ${longDate(next.retiresAt)}`} tone={daysUntil(next.retiresAt) <= 30 ? "rise" : ""} />
+          <Stat value={plural(daysUntil(next.retiresAt), "day")} label={next.source === "openrouter" ? `until ${next.model} leaves the OpenRouter catalogue on ${longDate(next.retiresAt)}` : `until ${providerName(next.provider)} retires ${next.model} on ${longDate(next.retiresAt)}`} href={next.href ?? undefined} tone={daysUntil(next.retiresAt) <= 30 ? "rise" : ""} />
           <Stat value={String(withinMonth)} label="retiring within 30 days" />
           <Stat value={String(rows.length)} label="notices with a date" />
         </div>
