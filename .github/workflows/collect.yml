@@ -3,24 +3,30 @@ name: collect
 # Collection is scheduled here rather than in the app so the cadence and the source list
 # can change without a redeploy.
 #
-# Short cron intervals are heavily delayed on GitHub, so instead of asking for a run every
-# 30 minutes we ask for one every 6 hours and have it loop, sweeping every 30 minutes for
-# just under the 6 hour job ceiling. Four well-honoured triggers a day beat 48 poorly
-# honoured ones.
+# Every run is short. A sweep of the catalogue and the status pages takes well under a
+# minute, so each schedule below does its work and exits rather than holding a runner.
+# GitHub delays scheduled runs at busy hours and occasionally skips one; that is fine
+# here, since every sweep is independent and the archive only records what changed.
 on:
   schedule:
-    - cron: "0 */6 * * *"    # long-running sweep loop
+    - cron: "*/30 * * * *"   # sweep: catalogue and status pages
+    - cron: "41 */6 * * *"   # slow sources: hosts, price lists, lifecycle notices
     - cron: "17 3 * * *"     # daily signals
   workflow_dispatch:
     inputs:
       job:
-        description: "sweep (loop for ~6h), once (single sweep of everything), daily, backfill (replay LiteLLM history, run once), or rebuild-records (run once)"
+        description: "sweep, slow, daily, once (everything), backfill (replay LiteLLM history), or rebuild-records"
         default: once
+
+# One run at a time. A slow run and a sweep that land together queue instead of overlapping.
+concurrency:
+  group: collect
+  cancel-in-progress: false
 
 jobs:
   collect:
     runs-on: ubuntu-latest
-    timeout-minutes: 358
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -35,34 +41,37 @@ jobs:
           JOB: ${{ github.event.inputs.job }}
         run: |
           set -u
-          if [ "$SCHEDULE" = "17 3 * * *" ] || [ "$JOB" = "daily" ]; then
-            node collector/fetch-and-post.mjs daily
-            exit 0
-          fi
-          if [ "$JOB" = "backfill" ]; then
-            node collector/fetch-and-post.mjs backfill-litellm
-            exit 0
-          fi
-          if [ "$JOB" = "rebuild-records" ]; then
-            node collector/fetch-and-post.mjs rebuild-records
-            exit 0
-          fi
-          if [ "$JOB" = "once" ]; then
-            node collector/fetch-and-post.mjs models
-            node collector/fetch-and-post.mjs status
-            node collector/fetch-and-post.mjs sources
-            node collector/fetch-and-post.mjs lifecycle
-            node collector/fetch-and-post.mjs hosts
-            exit 0
-          fi
-          # The slower-moving sources change daily at most; once per six-hour job is plenty.
-          node collector/fetch-and-post.mjs sources || true
-          node collector/fetch-and-post.mjs lifecycle || true
-          node collector/fetch-and-post.mjs hosts || true
-          # Sweep loop: ~11 sweeps over ~5h30m, then let the next trigger take over.
-          end=$(( $(date +%s) + 5*3600 + 30*60 ))
-          while [ "$(date +%s)" -lt "$end" ]; do
-            node collector/fetch-and-post.mjs models || true
-            node collector/fetch-and-post.mjs status || true
-            sleep 1800
-          done
+          case "$SCHEDULE" in
+            "*/30 * * * *") JOB=sweep ;;
+            "41 */6 * * *") JOB=slow ;;
+            "17 3 * * *") JOB=daily ;;
+          esac
+          case "$JOB" in
+            sweep)
+              node collector/fetch-and-post.mjs models
+              node collector/fetch-and-post.mjs status
+              ;;
+            slow)
+              node collector/fetch-and-post.mjs sources
+              node collector/fetch-and-post.mjs lifecycle
+              node collector/fetch-and-post.mjs hosts
+              ;;
+            daily)
+              node collector/fetch-and-post.mjs daily
+              ;;
+            once)
+              for job in models status sources lifecycle hosts; do
+                node collector/fetch-and-post.mjs "$job"
+              done
+              ;;
+            backfill)
+              node collector/fetch-and-post.mjs backfill-litellm
+              ;;
+            rebuild-records)
+              node collector/fetch-and-post.mjs rebuild-records
+              ;;
+            *)
+              echo "unknown job: $JOB" >&2
+              exit 2
+              ;;
+          esac
