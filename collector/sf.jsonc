@@ -1,0 +1,15 @@
+{
+  "$schema": "https://spacefast.com/schemas/sf.json",
+  "name": "AI Observatory collector",
+  // A worker rather than a capsule: the catalogues it reads are a few megabytes each, more than
+  // the capsule runtime will hold. It writes into the observatory through its ingest mutations.
+  "runtime": {
+    "kind": "functions",
+    "entry": "handler.mjs"
+  },
+  "crons": [
+    { "path": "/collect/sweep", "schedule": "*/30 * * * *" },
+    { "path": "/collect/slow", "schedule": "41 */6 * * *" },
+    { "path": "/collect/daily", "schedule": "17 3 * * *" }
+  ]
+}

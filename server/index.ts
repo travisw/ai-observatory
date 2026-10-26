@@ -1339,7 +1339,7 @@ export default capsule({
 
   endpoints: {
     /** Atom feed of stories. `?watch=claude,deepseek` narrows it; so do `provider`, `model`, `kind`. */
-    feed: endpoint({ method: "GET", path: "/feed.xml", mode: "read" }, async (raw, req) => {
+    feed: endpoint({ method: "GET", path: "/feed.xml" }, async (raw, req) => {
       const stories = await filteredStories(raw as unknown as Ctx, req.query, 60);
       const updated = stories[0]?.at ?? now();
       const self = `${SITE}/feed.xml${req.query.toString() ? `?${req.query.toString()}` : ""}`;
@@ -1371,12 +1371,12 @@ ${entries}
       return text(body, { headers: { "Content-Type": "application/atom+xml; charset=utf-8", "Cache-Control": "public, max-age=600" } });
     }),
 
-    apiChanges: endpoint({ method: "GET", path: "/api/changes.json", mode: "read" }, async (raw, req) => {
+    apiChanges: endpoint({ method: "GET", path: "/api/changes.json" }, async (raw, req) => {
       const stories = await filteredStories(raw as unknown as Ctx, req.query, 200);
       return json({ generatedAt: now(), stories: stories.map(publicStory) }, API_HEADERS);
     }),
 
-    apiModels: endpoint({ method: "GET", path: "/api/models.json", mode: "read" }, async (raw, req) => {
+    apiModels: endpoint({ method: "GET", path: "/api/models.json" }, async (raw, req) => {
       const ctx = raw as unknown as Ctx;
       const includeRetired = req.query.get("retired") === "1";
       const active = await ctx.db.models.withIndex("by_active", (range) => range.eq("active", true)).take(1000);
@@ -1384,7 +1384,7 @@ ${entries}
       return json({ generatedAt: now(), models: [...active, ...retired].map(publicModel) }, API_HEADERS);
     }),
 
-    apiModel: endpoint({ method: "GET", path: "/api/model.json", mode: "read" }, async (raw, req) => {
+    apiModel: endpoint({ method: "GET", path: "/api/model.json" }, async (raw, req) => {
       const ctx = raw as unknown as Ctx;
       const id = req.query.get("id") ?? "";
       const model = await ctx.db.models.withIndex("by_model", (range) => range.eq("modelId", id)).first();
@@ -1397,13 +1397,13 @@ ${entries}
       return json({ generatedAt: now(), model: publicModel(model), events: events.map(publicEvent), hosts, lifecycle, listings }, API_HEADERS);
     }),
 
-    apiIndex: endpoint({ method: "GET", path: "/api/index.json", mode: "read" }, async (raw) => {
+    apiIndex: endpoint({ method: "GET", path: "/api/index.json" }, async (raw) => {
       const ctx = raw as unknown as Ctx;
       const daily = await ctx.db.daily.withIndex("by_date").order("asc").take(1000);
       return json({ generatedAt: now(), method: INDEX_METHOD, daily }, API_HEADERS);
     }),
 
-    apiStatus: endpoint({ method: "GET", path: "/api/status.json", mode: "read" }, async (raw) => {
+    apiStatus: endpoint({ method: "GET", path: "/api/status.json" }, async (raw) => {
       const ctx = raw as unknown as Ctx;
       const since = new Date(Date.now() - 90 * DAY).toISOString();
       const statuses = await ctx.db.providerStatus.withIndex("by_provider").order("asc").take(50);
@@ -1411,7 +1411,7 @@ ${entries}
       return json({ generatedAt: now(), statuses, incidents }, API_HEADERS);
     }),
 
-    apiRetiring: endpoint({ method: "GET", path: "/api/retiring.json", mode: "read" }, async (raw) => {
+    apiRetiring: endpoint({ method: "GET", path: "/api/retiring.json" }, async (raw) => {
       const ctx = raw as unknown as Ctx;
       const since = new Date(Date.now() - 60 * DAY).toISOString().slice(0, 10);
       const rows = await ctx.db.lifecycle.withIndex("by_retires", (range) => range.gte("retiresAt", since)).order("asc").take(1000);
@@ -1423,13 +1423,13 @@ ${entries}
       }, API_HEADERS);
     }),
 
-    apiRecords: endpoint({ method: "GET", path: "/api/records.json", mode: "read" }, async (raw) => {
+    apiRecords: endpoint({ method: "GET", path: "/api/records.json" }, async (raw) => {
       const ctx = raw as unknown as Ctx;
       const records = await ctx.db.records.withIndex("by_key").order("asc").take(50);
       return json({ generatedAt: now(), records }, API_HEADERS);
     }),
 
-    exportChanges: endpoint({ method: "GET", path: "/export/changes.csv", mode: "read" }, async (raw) => {
+    exportChanges: endpoint({ method: "GET", path: "/export/changes.csv" }, async (raw) => {
       const ctx = raw as unknown as Ctx;
       const events = await ctx.db.events.withIndex("by_at").order("desc").take(1000);
       const lines = ["at,kind,model,provider,field,old_value,new_value"];
@@ -1442,7 +1442,7 @@ ${entries}
     }),
 
     /** Every page a crawler should know about. Model ids keep their slash, as the client's links do. */
-    sitemap: endpoint({ method: "GET", path: "/sitemap.xml", mode: "read" }, async (raw) => {
+    sitemap: endpoint({ method: "GET", path: "/sitemap.xml" }, async (raw) => {
       const ctx = raw as unknown as Ctx;
       const today = now().slice(0, 10);
       const models = await ctx.db.models.withIndex("by_active", (range) => range.eq("active", true)).take(1000);
@@ -1466,7 +1466,7 @@ ${urls.map((u) => `  <url><loc>${escapeXml(u.loc)}</loc><lastmod>${escapeXml(u.l
     }),
 
     /** A plain HTML listing of every model and the latest changes, for crawlers that do not run scripts. */
-    directory: endpoint({ method: "GET", path: "/directory.html", mode: "read" }, async (raw) => {
+    directory: endpoint({ method: "GET", path: "/directory.html" }, async (raw) => {
       const ctx = raw as unknown as Ctx;
       const models = await ctx.db.models.withIndex("by_active", (range) => range.eq("active", true)).take(1000);
       const events = await ctx.db.events.withIndex("by_at").order("desc").take(100);
@@ -1476,7 +1476,7 @@ ${urls.map((u) => `  <url><loc>${escapeXml(u.loc)}</loc><lastmod>${escapeXml(u.l
     }),
 
     /** Shields-style badge: `?model=anthropic/claude-haiku-4.5&metric=input|output|context|changed|retires`. */
-    badge: endpoint({ method: "GET", path: "/badge.svg", mode: "read" }, async (raw, req) => {
+    badge: endpoint({ method: "GET", path: "/badge.svg" }, async (raw, req) => {
       const ctx = raw as unknown as Ctx;
       const id = req.query.get("model") ?? "";
       const metric = req.query.get("metric") ?? "input";
@@ -1516,7 +1516,7 @@ ${urls.map((u) => `  <url><loc>${escapeXml(u.loc)}</loc><lastmod>${escapeXml(u.l
       return text(badgeSvg(label, value, color), { headers: { "Content-Type": "image/svg+xml; charset=utf-8", "Cache-Control": "public, max-age=1800", "Access-Control-Allow-Origin": "*" } });
     }),
 
-    ogModel: endpoint({ method: "GET", path: "/og/model.png", mode: "read" }, async (raw, req) => {
+    ogModel: endpoint({ method: "GET", path: "/og/model.png" }, async (raw, req) => {
       const ctx = raw as unknown as Ctx;
       const id = req.query.get("id") ?? "";
       const model = await ctx.db.models.withIndex("by_model", (range) => range.eq("modelId", id)).first();
@@ -1530,7 +1530,7 @@ ${urls.map((u) => `  <url><loc>${escapeXml(u.loc)}</loc><lastmod>${escapeXml(u.l
       return card(title, price, sub, model.active ? `${Number(model.changeCount ?? 0)} changes on record` : "No longer listed");
     }),
 
-    ogStory: endpoint({ method: "GET", path: "/og/story.png", mode: "read" }, async (raw, req) => {
+    ogStory: endpoint({ method: "GET", path: "/og/story.png" }, async (raw, req) => {
       const ctx = raw as unknown as Ctx;
       const id = req.query.get("model") ?? "";
       const at = req.query.get("at") ?? "";
@@ -1544,7 +1544,7 @@ ${urls.map((u) => `  <url><loc>${escapeXml(u.loc)}</loc><lastmod>${escapeXml(u.l
       return card(story.headline, [story.detail, ...story.more].filter(Boolean).join(" · "), `${longDate(story.at)}${delta === null ? "" : ` · ${delta < 0 ? "−" : "+"}${Math.abs(delta).toFixed(0)}%`}`, "ai-observatory.view.fast");
     }),
 
-    ogSite: endpoint({ method: "GET", path: "/og/site.png", mode: "read" }, async (raw) => {
+    ogSite: endpoint({ method: "GET", path: "/og/site.png" }, async (raw) => {
       const ctx = raw as unknown as Ctx;
       const active = await ctx.db.models.withIndex("by_active", (range) => range.eq("active", true)).take(1000);
       const providers = new Set(active.map((m) => String(m.provider).replace(/^~/, "")));
@@ -1554,7 +1554,7 @@ ${urls.map((u) => `  <url><loc>${escapeXml(u.loc)}</loc><lastmod>${escapeXml(u.l
     }),
 
     /** Platform cron: the daily rollup. Guarded by CRON_SECRET so only the scheduler can run it. */
-    cronRollup: endpoint({ method: "GET", path: "/cron/rollup", mode: "write" }, async (ctx, req) => {
+    cronRollup: endpoint({ method: "GET", path: "/cron/rollup", readOnly: false }, async (ctx, req) => {
       const secret = ctx.env.CRON_SECRET;
       const header = req.headers.get("authorization") ?? "";
       if (!secret || header !== `Bearer ${secret}`) return json({ ok: false, error: "unauthorized" }, { status: 401 });

@@ -1,10 +1,8 @@
 /**
- * Transport shared by every collector job: polite fetching with backoff, and the one
- * call shape the capsule accepts.
+ * Transport shared by every collector job: polite fetching with backoff, and the one call
+ * shape the capsule accepts. Plain `fetch` throughout, so the same code runs as a worker
+ * on Spacefast and under node from any machine.
  */
-
-export const BASE = process.env.OBSERVATORY_URL ?? "https://ai-observatory.view.fast";
-export const TOKEN = process.env.INGEST_TOKEN;
 
 // A real browser UA gets us past the basic bot check some status pages front with.
 export const HEADERS = {
@@ -47,20 +45,31 @@ export async function withBackoff(fn, { attempts = 5, baseMs = 4000 } = {}) {
   }
 }
 
-/** Calls a capsule mutation over the same transport the browser uses. */
-export async function callMutation(name, args) {
-  const res = await fetch(`${BASE}/__zero/run`, {
-    method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify({ op: "mutation.run", name, args }),
-  });
-  const text = await res.text();
-  if (!res.ok) throw new Error(`${name} -> ${res.status} ${text.slice(0, 200)}`);
-  const parsed = JSON.parse(text);
-  const result = parsed?.result ?? parsed?.data ?? parsed;
-  if (result?.ok === false) throw new Error(`${name} -> ${result.error ?? "rejected"}`);
-  return result;
-}
-
-/** Chunked: the whole catalogue in one request exceeds the runtime's budget. */
+/** Chunked: the whole catalogue in one request exceeds the capsule's request budget. */
 export const CHUNK = 40;
+
+/**
+ * What every job needs from its surroundings: where the observatory is, the token its
+ * ingest mutations check, and somewhere to write a line of progress.
+ */
+export function makeContext({ base = "https://ai-observatory.view.fast", token, githubToken = "", log = console.log }) {
+  if (!token) throw new Error("INGEST_TOKEN is required.");
+  return {
+    githubToken,
+    log,
+    /** Calls a capsule mutation over the same transport the browser uses. The token goes first, as every ingest mutation expects. */
+    async mutate(name, ...args) {
+      const res = await fetch(`${base}/__zero/run`, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ op: "mutation.run", name, args: [token, ...args] }),
+      });
+      const text = await res.text();
+      if (!res.ok) throw new Error(`${name} -> ${res.status} ${text.slice(0, 200)}`);
+      const parsed = JSON.parse(text);
+      const result = parsed?.result ?? parsed?.data ?? parsed;
+      if (result?.ok === false) throw new Error(`${name} -> ${result.error ?? "rejected"}`);
+      return result;
+    },
+  };
+}

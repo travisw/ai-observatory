@@ -6,8 +6,9 @@ Live: **https://ai-observatory.view.fast/**
 
 Providers change prices, context limits, aliases and availability without announcing it, and
 edit their docs in place. This site checks every half hour, writes down what moved, and keeps
-the record forever. It is built entirely on Spacefast Zero; collection runs on GitHub Actions
-and writes in through the capsule's mutations.
+the record forever. It is built entirely on Spacefast: a Zero capsule for the archive and the
+site, and a small worker on a second space that collects on a schedule and writes in through
+the capsule's mutations.
 
 ## What it tracks
 
@@ -46,9 +47,17 @@ the public endpoints and the console queries. `shared/` holds the story builder 
 helpers used by both the capsule and the browser. The client (`client/`) is a Preact app on the
 Zero kit and charts.
 
-Collection runs separately in `collector/` on a GitHub Actions schedule and writes in through
-mutations. Keeping collection outside the app means the schedule, the retries and the source
-list can change without redeploying, and any job can be run by hand against any environment.
+Collection runs separately in `collector/`, a Spacefast Functions worker on its own space
+(`ai-observatory-collector`, with its own `sf.jsonc` and crons), and writes in through
+mutations. It is a worker rather than part of the capsule because the catalogues it reads are
+several megabytes each, more than the capsule runtime will hold in memory. Keeping collection
+outside the app also means the schedule, the retries and the source list can change without
+redeploying the site, and any job can be run by hand against any environment.
+
+The worker answers `/collect/sweep`, `/collect/slow` and `/collect/daily` for the scheduler,
+and any single job name. It accepts a request only with the scheduler's own `x-spacefast-cron`
+header or the space's `CRON_SECRET` as a bearer token. `INGEST_TOKEN` on the collector space
+must match the one on the observatory.
 
 Sweeps are chunked so each request stays small, and every chunk in a sweep shares one
 timestamp, so the finalize step can tell what was absent from the whole sweep rather than
@@ -60,15 +69,24 @@ The daily market rollup runs on the platform's own scheduler (`crons` in `sf.jso
 
 ## Running the collector
 
+On the platform, a scheduled job can be run now:
+
+```sh
+sf crons run collect-sweep --space ai-observatory-collector --header "authorization: Bearer $CRON_SECRET"
+```
+
+By hand, from any machine with node 18+, against any environment:
+
 ```sh
 INGEST_TOKEN=... OBSERVATORY_URL=https://ai-observatory.view.fast \
-  node collector/fetch-and-post.mjs [models|hosts|status|sources|lifecycle|daily|all]
+  node collector/fetch-and-post.mjs [sweep|slow|daily|once|models|hosts|status|sources|lifecycle]
 ```
 
 `backfill-litellm` replays the weekly history of LiteLLM's price file (back to 2023) into the
-first-party archive. It is manual, run once, and never scheduled.
+first-party archive, and `rebuild-records` reseeds the records page from the archive. Both are
+manual, run once by hand, and never reachable from the worker.
 
-No dependencies. Node 18+.
+To deploy the worker: `cd collector && sf publish`. No dependencies.
 
 ## Development
 

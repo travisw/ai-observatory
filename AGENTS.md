@@ -29,8 +29,9 @@ configure.
   adds sign-in.
 - Server-only variables: read through `ctx.env`, define in `.env.server`.
   They never reach the client or the build.
-- Outbound `fetch` works only inside actions — never in queries, mutations,
-  or endpoints.
+- Outbound `fetch` works in every handler, but the capsule runtime holds very
+  little memory: a response of a few hundred kilobytes fails. Anything that
+  reads a whole catalogue lives in the collector worker, not here.
 - No Node built-ins, no dynamic `import()`, no `require()` anywhere in
   capsule code.
 
