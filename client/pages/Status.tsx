@@ -43,7 +43,7 @@ export function StatusPage() {
   return (
     <div class="stack">
       <PageHead title="Status" action={<><Chip to="/providers">All providers</Chip><Chip href="/api/status.json">JSON</Chip></>}>
-        From each provider's own status page, checked every half hour. A dim day is one with no record, never an assumption of uptime.
+        From each provider's own status page, checked every hour. A dim day is one with no record, never an assumption of uptime.
       </PageHead>
 
       <Section title="Last 90 days">

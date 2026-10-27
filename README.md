@@ -5,7 +5,7 @@ The changelog AI providers don't publish.
 Live: **https://ai-observatory.view.fast/**
 
 Providers change prices, context limits, aliases and availability without announcing it, and
-edit their docs in place. This site checks every half hour, writes down what moved, and keeps
+edit their docs in place. This site checks every hour, writes down what moved, and keeps
 the record forever. It is built entirely on Spacefast: a Zero capsule for the archive and the
 site, and a small worker on a second space that collects on a schedule and writes in through
 the capsule's mutations.
@@ -14,11 +14,11 @@ the capsule's mutations.
 
 | Signal | Source | Cadence |
 |---|---|---|
-| Catalogue, prices, context, long-context tiers, alias targets, expiry dates, capability flags for ~460 models | OpenRouter `/api/v1/models` | 30 min |
+| Catalogue, prices, context, long-context tiers, alias targets, expiry dates, capability flags for ~460 models | OpenRouter `/api/v1/models` | 1 h |
 | Which hosts serve each model, at what price, quantization and uptime | OpenRouter `/api/v1/models/{id}/endpoints` | 6 h |
 | First-party price lists, for cross-checking | models.dev, LiteLLM | 6 h |
 | Deprecation and retirement notices | OpenAI, Anthropic and Cohere deprecation pages; LiteLLM and models.dev flags | 6 h |
-| Provider status and incidents | Statuspage JSON for OpenAI, Anthropic, Groq, Cohere, Cerebras, Fireworks, Perplexity, Replicate; Google Cloud incidents | 30 min |
+| Provider status and incidents | Statuspage JSON for OpenAI, Anthropic, Groq, Cohere, Cerebras, Fireworks, Perplexity, Replicate; Google Cloud incidents | 1 h |
 | Market summary (median prices, frontier / mid / budget baskets) | computed from the archive | daily |
 | Open-weights attention, SDK downloads, repo stars | Hugging Face, npm, PyPI, GitHub | daily |
 
@@ -86,7 +86,9 @@ INGEST_TOKEN=... OBSERVATORY_URL=https://ai-observatory.view.fast \
 first-party archive, and `rebuild-records` reseeds the records page from the archive. Both are
 manual, run once by hand, and never reachable from the worker.
 
-To deploy the worker: `cd collector && sf publish`. No dependencies.
+To deploy the worker: `cd collector && sf publish`. No dependencies. The publish writes its bundle
+under `collector/__spacefast/`, which git ignores; remove that directory before publishing the
+site from the repo root, or the site publish tries to upload it and is refused.
 
 ## Development
 

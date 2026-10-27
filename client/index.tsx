@@ -191,7 +191,7 @@ function Shell() {
           </Routes>
         </main>
         <footer class="foot">
-          <span>Every listing checked every half hour and compared with the last reading. Nothing is deleted.</span>
+          <span>Every listing checked every hour and compared with the last reading. Nothing is deleted.</span>
           <span style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
             <Link to="/about">About</Link>
             <Link to="/api">API & feeds</Link>

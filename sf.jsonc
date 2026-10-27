@@ -9,7 +9,7 @@
   "fallback": "/index.html",
   "meta": {
     "title": "AI Observatory",
-    "description": "The changelog AI providers don't publish: every price, limit, listing and retirement, checked every 30 minutes and kept forever.",
+    "description": "The changelog AI providers don't publish: every price, limit, listing and retirement, checked every hour and kept forever.",
     "image": "https://ai-observatory.view.fast/og/site.png",
     "favicon": "/favicon.svg"
   },

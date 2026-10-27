@@ -7,9 +7,10 @@
     "kind": "functions",
     "entry": "handler.mjs"
   },
+  // Schedules are named intervals (hourly, daily, Nh); the scheduler does not take crontab lines.
   "crons": [
-    { "path": "/collect/sweep", "schedule": "*/30 * * * *" },
-    { "path": "/collect/slow", "schedule": "41 */6 * * *" },
-    { "path": "/collect/daily", "schedule": "17 3 * * *" }
+    { "path": "/collect/sweep", "schedule": "hourly" },
+    { "path": "/collect/slow", "schedule": "6h" },
+    { "path": "/collect/daily", "schedule": "daily" }
   ]
 }

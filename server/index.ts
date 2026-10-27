@@ -1550,7 +1550,7 @@ ${urls.map((u) => `  <url><loc>${escapeXml(u.loc)}</loc><lastmod>${escapeXml(u.l
       const providers = new Set(active.map((m) => String(m.provider).replace(/^~/, "")));
       const stories = await filteredStories(ctx, new URLSearchParams(), 6);
       const lead = stories.find((s) => !s.source && s.kind !== "drift");
-      return card("AI Observatory", "The changelog AI providers don't publish", lead ? lead.headline : "", `${active.length} models · ${providers.size} providers · checked every 30 minutes`);
+      return card("AI Observatory", "The changelog AI providers don't publish", lead ? lead.headline : "", `${active.length} models · ${providers.size} providers · checked every hour`);
     }),
 
     /** Platform cron: the daily rollup. Guarded by CRON_SECRET so only the scheduler can run it. */
@@ -2140,7 +2140,7 @@ nav{font-size:12px;color:#9a958a;margin-bottom:16px}
 <main>
 <nav><a href="/">AI Observatory</a> · directory</nav>
 <h1>AI Observatory directory</h1>
-<p>${escapeXml(description)} Prices are per million tokens as listed on OpenRouter. Every listing is checked every half hour and every change is kept; each model's page has its full history.</p>
+<p>${escapeXml(description)} Prices are per million tokens as listed on OpenRouter. Every listing is checked every hour and every change is kept; each model's page has its full history.</p>
 <p>Jump to: ${providers.map((slug) => `<a href="#${escapeXml(slug)}">${escapeXml(providerName(slug))}</a>`).join(" · ")}</p>
 ${sections}
 <h2 id="changes">Latest changes</h2>

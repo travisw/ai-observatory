@@ -26,7 +26,7 @@ export function AboutPage() {
           If you build on AI models, the price and limits of the one you picked change under you, and nobody sends an email. A model gets cheaper, or dearer, or its context window shrinks, or it quietly disappears, and the only trace is a pricing page that now says something different from what it said last week.
         </p>
         <p>
-          AI Observatory keeps the record. Every half hour it reads the public price list for every model it can see, compares it with the one from half an hour ago, and writes down anything that moved, with the time. Nothing is ever deleted. The result is a history that did not otherwise exist, written up each day as the news it is.
+          AI Observatory keeps the record. Every hour it reads the public price list for every model it can see, compares it with the one from an hour ago, and writes down anything that moved, with the time. Nothing is ever deleted. The result is a history that did not otherwise exist, written up each day as the news it is.
         </p>
       </div>
 

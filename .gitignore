@@ -7,3 +7,4 @@ dist/
 .spacefast/.spacefast-*
 .spacefast/.space-link-*.tmp
 .tscheck/
+__spacefast/
