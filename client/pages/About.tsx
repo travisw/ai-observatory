@@ -54,6 +54,7 @@ export function AboutPage() {
           <li>Hosts: where a model is served from, what each host charges, and whether it is up.</li>
           <li>Retirements: the dates providers publish for switching a model off, and the replacements they recommend.</li>
           <li>Status: whether each provider says it is up right now, and its incident history.</li>
+          <li>Published results: what Epoch AI and LMArena report for each model, so a price can be read against a score.</li>
         </ul>
       </Section>
 
@@ -71,7 +72,7 @@ export function AboutPage() {
 
       <Section title="What it is not">
         <p>
-          This is not a benchmark and not a recommendation. The capability score shown beside some models is the Artificial Analysis intelligence index as published by OpenRouter, included only so that price can be read against something. The product is the diff.
+          This is not a benchmark and not a recommendation. The <Link to="/benchmarks" class="acc hl">published results</Link> shown beside prices are copied once a day from Epoch AI and LMArena, each with a link to its source; nothing is run here. The capability score shown beside some models is the Artificial Analysis intelligence index as published by OpenRouter, included only so that price can be read against something. The product is the diff.
         </p>
       </Section>
 

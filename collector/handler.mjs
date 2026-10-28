@@ -1,7 +1,7 @@
 /**
  * The collector as a Spacefast worker. The platform's scheduler (see `sf.jsonc` beside this
- * file) asks for `/collect/sweep`, `/collect/slow` and `/collect/daily`; any single job name
- * works too for a run by hand with `sf crons run`.
+ * file) asks for `/collect/sweep`, `/collect/slow`, `/collect/daily` and `/collect/benchmarks`;
+ * any single job name works too for a run by hand with `sf crons run`.
  *
  * A request is honoured when it carries the scheduler's own `x-spacefast-cron` header or the
  * space's `CRON_SECRET` as a bearer token. The ingest token never leaves the space: it is read

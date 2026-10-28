@@ -5,11 +5,12 @@
 import { useMemo, useState } from "preact/hooks";
 import { Link, useNavigate, useParams, useQuery } from "@spacefast/zero/client";
 
+import { BENCHMARK_SOURCE, benchmarkSpec, scoreText } from "../../shared/benchmarks";
 import { formatContext, money, parseTiers } from "../../shared/model";
 import { isAlias, modelName, providerName } from "../../shared/providers";
 import { SOURCE_LABEL, SOURCE_URL, canonicalKey } from "../../shared/sources";
 import type { Story } from "../../shared/stories";
-import type { ArchiveEvent, LifecycleRow, ModelPageData, ModelRow } from "../../shared/types";
+import type { ArchiveEvent, BenchmarkRow, LifecycleRow, ModelPageData, ModelRow } from "../../shared/types";
 import { StepChart, StepTable, type StepSeries } from "../components/StepChart";
 import { Chip, Empty, Fig, More, Pill, Section, Skeleton, StoryRow, StoryTable } from "../components/Wire";
 import { sourceStepSeries, stepSeries } from "../lib/series";
@@ -41,6 +42,26 @@ function noticeLine(row: LifecycleRow, tracked: Map<string, string>): preact.Com
   if (row.state !== "retired" && !row.retiresAt && row.state === "deprecated") parts.push(<span>retirement date to be announced</span>);
   if (row.replacement) parts.push(<span>replacement: {replacementId ? <Link to={modelHref(replacementId)} class="acc hl">{modelName(replacementId)}</Link> : <span class="mono">{row.replacement}</span>}</span>);
   return parts.map((p, i) => <span key={i}>{i ? " · " : ""}{p}</span>);
+}
+
+/** A model's results grouped per benchmark, best setting first, in the order the benchmarks page lists them. */
+function resultLines(rows: BenchmarkRow[]): { best: BenchmarkRow; others: BenchmarkRow[] }[] {
+  const bySlug = new Map<string, BenchmarkRow[]>();
+  for (const row of rows) {
+    const list = bySlug.get(row.slug);
+    if (list) list.push(row);
+    else bySlug.set(row.slug, [row]);
+  }
+  const order = (slug: string) => {
+    const spec = benchmarkSpec(slug);
+    return spec ? ["eci", "arena-text"].indexOf(slug) + 1 || 10 : 20;
+  };
+  return [...bySlug.entries()]
+    .sort((a, b) => order(a[0]) - order(b[0]) || a[0].localeCompare(b[0]))
+    .map(([, list]) => {
+      const sorted = list.slice().sort((a, b) => Number(b.score) - Number(a.score));
+      return { best: sorted[0], others: sorted.slice(1) };
+    });
 }
 
 function CopyChip(props: { text: string; label: string }) {
@@ -129,6 +150,7 @@ export function ModelPage() {
   const tiers = parseTiers(model.tiers);
   const key = canonicalKey(model.provider, model.modelId);
   const listings = data.listings.slice().sort((a, b) => a.source.localeCompare(b.source));
+  const results = resultLines(data.benchmarks ?? []);
   const badgeMarkdown = `![input price](https://ai-observatory.view.fast/badge.svg?model=${model.modelId}&metric=input)`;
   const name = shortName(model.modelId, model.name);
   const sinceWord = (p: number | null) => (p !== null && p !== 0 ? `${signedPct(p)} since listed` : "unchanged since listed");
@@ -285,6 +307,35 @@ export function ModelPage() {
           </>
         )}
       </Section>
+
+      {results.length ? (
+        <Section title="Published results" hint="copied from Epoch AI and LMArena, not run here" action={<More to={`/benchmarks?b=${results[0].best.slug}`}>All benchmarks</More>}>
+          <div class="tw">
+            <table>
+              <thead><tr><th>Benchmark</th><th class="n">Score</th><th>Setting</th><th>Measured</th><th>Source</th></tr></thead>
+              <tbody>
+                {results.map(({ best, others }) => {
+                  const spec = benchmarkSpec(best.slug);
+                  const source = BENCHMARK_SOURCE[best.source];
+                  return (
+                    <tr key={best.slug}>
+                      <td><Link to={`/benchmarks?b=${best.slug}`} class="hl">{spec?.name ?? best.benchmark}</Link></td>
+                      <td class="n">{scoreText(best.score, best.unit)}{best.detail ? <span class="small soft" style={{ marginLeft: 6 }}>{best.detail}</span> : null}</td>
+                      <td class="small soft">
+                        {best.variant || "–"}
+                        {others.length ? <span class="who num">also {others.map((o) => `${o.variant || "default"} ${scoreText(o.score, o.unit)}`).join(" · ")}</span> : null}
+                      </td>
+                      <td class="when">{best.date ? dayYear(best.date) : "–"}</td>
+                      <td class="small">{best.url ? <a href={best.url} class="acc hl" target="_blank" rel="noopener">{source?.label ?? best.source} →</a> : source?.label ?? best.source}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p class="note" style={{ marginTop: 8 }}>As published for <span class="mono">{results[0].best.sourceModel}</span>{results.some((r) => r.best.sourceModel !== results[0].best.sourceModel) ? " and the source's other names for this model" : ""}. The setting is the source's run configuration, not a choice made here.</p>
+        </Section>
+      ) : null}
 
       {lifecycle.length ? (
         <Section title="Notices" hint="from the providers' own pages">

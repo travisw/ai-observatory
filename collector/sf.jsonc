@@ -11,6 +11,7 @@
   "crons": [
     { "path": "/collect/sweep", "schedule": "hourly" },
     { "path": "/collect/slow", "schedule": "6h" },
-    { "path": "/collect/daily", "schedule": "daily" }
+    { "path": "/collect/daily", "schedule": "daily" },
+    { "path": "/collect/benchmarks", "schedule": "daily" }
   ]
 }

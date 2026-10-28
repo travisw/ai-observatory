@@ -15,6 +15,7 @@ import { hm } from "./lib/text";
 import { ago } from "./lib/util";
 import { AboutPage } from "./pages/About";
 import { ApiPage } from "./pages/Api";
+import { BenchmarksPage } from "./pages/Benchmarks";
 import { ChangesPage } from "./pages/Changes";
 import { ComparePage } from "./pages/Compare";
 import { GraveyardPage } from "./pages/Graveyard";
@@ -37,6 +38,7 @@ const PRIMARY = [
   { to: "/providers", label: "Providers", match: (p: string) => p.startsWith("/provider") },
   { to: "/retiring", label: "Retirements", match: (p: string) => p === "/retiring" || p === "/graveyard" },
   { to: "/status", label: "Status", match: (p: string) => p === "/status" },
+  { to: "/benchmarks", label: "Benchmarks", match: (p: string) => p === "/benchmarks" },
   { to: "/index", label: "Index", match: (p: string) => p === "/index" },
 ];
 
@@ -180,6 +182,7 @@ function Shell() {
             <Route path="/retiring" element={<RetiringPage />} />
             <Route path="/graveyard" element={<GraveyardPage />} />
             <Route path="/records" element={<RecordsPage />} />
+            <Route path="/benchmarks" element={<BenchmarksPage />} />
             <Route path="/index" element={<PriceIndexPage />} />
             <Route path="/time-machine" element={<TimeMachinePage />} />
             <Route path="/pulse" element={<PulsePage />} />

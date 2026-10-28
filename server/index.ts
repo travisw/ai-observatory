@@ -16,6 +16,7 @@ import {
   type TrackedField,
   type TrackedModel,
 } from "../shared/model";
+import { BENCHMARKS, benchmarkSpec, looseKey, looseSlug, providerFromOrg, splitVariant } from "../shared/benchmarks";
 import { isAlias, modelName, providerName } from "../shared/providers";
 import { FIRST_PARTY, canonicalKey, canonicalProvider } from "../shared/sources";
 import {
@@ -354,6 +355,36 @@ export default capsule({
       note: string(),
       ms: string(),
     }).index("by_at", ["at"]),
+
+    /**
+     * Published benchmark results, one row per (leaderboard, benchmark, model as the source
+     * names it). `key` is the loose model key the catalogue is joined on; `rowKey` is the
+     * source's own identity for the row, for upserts.
+     */
+    benchmarks: table({
+      source: string(),
+      slug: string(),
+      benchmark: string(),
+      key: string(),
+      provider: string(),
+      sourceModel: string(),
+      variant: string(),
+      score: string(),
+      unit: string(),
+      rank: string(),
+      detail: string(),
+      date: string(),
+      url: string(),
+      rowKey: string(),
+      fingerprint: string(),
+      firstSeenAt: string(),
+      lastSeenAt: string(),
+      active: boolean(),
+    })
+      .index("by_source", ["source"])
+      .index("by_source_row", ["source", "rowKey"])
+      .index("by_slug", ["slug"])
+      .index("by_key", ["key"]),
   },
 
   queries: {
@@ -496,7 +527,7 @@ export default capsule({
     modelPage: query(async (ctx, modelId: string) => {
       const model = await ctx.db.models.withIndex("by_model", (range) => range.eq("modelId", modelId)).first();
       if (!model) {
-        return { model: null, events: [], hosts: [], hostEvents: [], lifecycle: [], listings: [], sourceEvents: [], family: [] };
+        return { model: null, events: [], hosts: [], hostEvents: [], lifecycle: [], listings: [], sourceEvents: [], benchmarks: [], family: [] };
       }
       const events = await ctx.db.events.withIndex("by_model", (range) => range.eq("modelId", modelId)).order("asc").collect();
       const hosts = await ctx.db.hosts.withIndex("by_model", (range) => range.eq("modelId", modelId)).collect();
@@ -505,6 +536,7 @@ export default capsule({
       const lifecycle = await ctx.db.lifecycle.withIndex("by_key", (range) => range.eq("key", key)).collect();
       const listings = await ctx.db.sourceModels.withIndex("by_key", (range) => range.eq("key", key)).collect();
       const sourceEvents = await ctx.db.sourceEvents.withIndex("by_key", (range) => range.eq("key", key)).order("asc").collect();
+      const benchmarks = await benchmarksFor(ctx as unknown as Ctx, String(model.provider), modelId);
 
       const siblings = await ctx.db.models.withIndex("by_provider", (range) => range.eq("provider", String(model.provider))).collect();
       const aliasProvider = isAlias(modelId) ? String(model.provider).replace(/^~/, "") : `~${model.provider}`;
@@ -513,7 +545,7 @@ export default capsule({
       const family = [...siblings, ...aliasSide].filter(
         (row) => row.modelId !== modelId && (familyStem(String(row.modelId)) === stem || row.aliasTarget === modelId || model.aliasTarget === row.modelId)
       );
-      return { model, events, hosts, hostEvents, lifecycle, listings, sourceEvents, family };
+      return { model, events, hosts, hostEvents, lifecycle, listings, sourceEvents, benchmarks, family };
     }),
 
     providerPage: query(async (ctx, slug: string) => {
@@ -717,6 +749,12 @@ export default capsule({
         if (row.ok === true && !latest[source]) latest[source] = String(row.at);
       }
       return latest;
+    }),
+
+    /** Every current result on one leaderboard. The client joins them to the catalogue. */
+    benchmarkPage: query(async (ctx, slug: string) => {
+      const rows = await ctx.db.benchmarks.withIndex("by_slug", (range) => range.eq("slug", slug)).collect();
+      return { slug, rows: rows.filter((row) => row.active === true) };
     }),
   },
 
@@ -1335,6 +1373,74 @@ export default capsule({
       const result = await rollup(ctx, day);
       return { ok: true, ...result };
     }),
+
+    /**
+     * One chunk of a leaderboard. Rows are upserted by the source's own naming; the loose key
+     * that joins them to the catalogue is computed here so the rules live in one place.
+     */
+    ingestBenchmarks: mutation(async (ctx, token: string, source: string, runAt: string, rows: RawBenchmark[]) => {
+      if (!allowed(ctx, token)) return { ok: false, error: "unauthorized" };
+      const at = runAt || now();
+      let added = 0;
+      let changed = 0;
+
+      for (const raw of rows ?? []) {
+        if (!raw?.slug || !raw.sourceModel || raw.score === undefined || raw.score === "") continue;
+        const { base, variant } = splitVariant(raw.sourceModel);
+        const provider = providerFromOrg(raw.organization ?? "");
+        const row = {
+          source,
+          slug: raw.slug,
+          benchmark: raw.benchmark ?? raw.slug,
+          key: looseKey(provider, base),
+          provider,
+          sourceModel: raw.sourceModel,
+          variant,
+          score: normalizeNumeric(raw.score),
+          unit: raw.unit ?? "pct",
+          rank: raw.rank ?? "",
+          detail: raw.detail ?? "",
+          date: raw.date ?? "",
+          url: raw.url ?? "",
+          rowKey: `${raw.slug}|${raw.sourceModel}`,
+        };
+        const fingerprint = BENCHMARK_FIELDS.map((field) => row[field]).join("|");
+        const prior = await ctx.db.benchmarks.withIndex("by_source_row", (range) => range.eq("source", source).eq("rowKey", row.rowKey)).first();
+        if (!prior) {
+          await ctx.db.benchmarks.insert({ ...row, fingerprint, firstSeenAt: at, lastSeenAt: at, active: true });
+          added++;
+          continue;
+        }
+        if (prior.fingerprint === fingerprint && prior.active === true && prior.key === row.key) {
+          await ctx.db.benchmarks.update(prior.id, { lastSeenAt: at });
+          continue;
+        }
+        await ctx.db.benchmarks.update(prior.id, { ...row, fingerprint, lastSeenAt: at, active: true });
+        changed++;
+      }
+      return { ok: true, added, changed };
+    }),
+
+    /** Marks a source's rows that this run did not send as gone. Nothing is deleted. */
+    finalizeBenchmarks: mutation(async (ctx, token: string, source: string, runAt: string, listed: number) => {
+      if (!allowed(ctx, token)) return { ok: false, error: "unauthorized" };
+      const started = Date.now();
+      const at = runAt || now();
+      let removed = 0;
+      let cursor: string | null = null;
+      for (;;) {
+        const page = await ctx.db.benchmarks.withIndex("by_source", (range) => range.eq("source", source)).paginate({ cursor, numItems: 200 });
+        for (const row of page.page) {
+          if (row.active === false || String(row.lastSeenAt ?? "") === at) continue;
+          await ctx.db.benchmarks.update(row.id, { active: false });
+          removed++;
+        }
+        if (page.isDone || !page.continueCursor) break;
+        cursor = page.continueCursor;
+      }
+      await ctx.db.polls.insert({ at, source, ok: true, note: `${listed} results, ${removed} gone`, ms: String(Date.now() - started) });
+      return { ok: true, removed };
+    }),
   },
 
   endpoints: {
@@ -1394,7 +1500,8 @@ ${entries}
       const key = canonicalKey(String(model.provider), id);
       const lifecycle = await ctx.db.lifecycle.withIndex("by_key", (range) => range.eq("key", key)).collect();
       const listings = await ctx.db.sourceModels.withIndex("by_key", (range) => range.eq("key", key)).collect();
-      return json({ generatedAt: now(), model: publicModel(model), events: events.map(publicEvent), hosts, lifecycle, listings }, API_HEADERS);
+      const benchmarks = (await benchmarksFor(ctx, String(model.provider), id)).map(publicBenchmark);
+      return json({ generatedAt: now(), model: publicModel(model), events: events.map(publicEvent), hosts, lifecycle, listings, benchmarks }, API_HEADERS);
     }),
 
     apiIndex: endpoint({ method: "GET", path: "/api/index.json" }, async (raw) => {
@@ -1429,6 +1536,18 @@ ${entries}
       return json({ generatedAt: now(), records }, API_HEADERS);
     }),
 
+    /** The leaderboards read, or with `?benchmark=`, every current result on one of them. */
+    apiBenchmarks: endpoint({ method: "GET", path: "/api/benchmarks.json" }, async (raw, req) => {
+      const ctx = raw as unknown as Ctx;
+      const slug = req.query.get("benchmark") ?? "";
+      if (!slug) return json({ generatedAt: now(), benchmarks: BENCHMARKS }, API_HEADERS);
+      const spec = benchmarkSpec(slug);
+      if (!spec) return json({ error: "unknown benchmark", benchmark: slug, benchmarks: BENCHMARKS.map((b) => b.slug) }, { ...API_HEADERS, status: 404 });
+      const rows = await ctx.db.benchmarks.withIndex("by_slug", (range) => range.eq("slug", slug)).collect();
+      const results = rows.filter((row) => row.active === true).sort((a, b) => Number(b.score) - Number(a.score)).map(publicBenchmark);
+      return json({ generatedAt: now(), benchmark: spec, results }, API_HEADERS);
+    }),
+
     exportChanges: endpoint({ method: "GET", path: "/export/changes.csv" }, async (raw) => {
       const ctx = raw as unknown as Ctx;
       const events = await ctx.db.events.withIndex("by_at").order("desc").take(1000);
@@ -1447,9 +1566,10 @@ ${entries}
       const today = now().slice(0, 10);
       const models = await ctx.db.models.withIndex("by_active", (range) => range.eq("active", true)).take(1000);
       const urls: { loc: string; lastmod: string }[] = [];
-      for (const path of ["/", "/changes", "/models", "/providers", "/retiring", "/status", "/index", "/records", "/graveyard", "/about", "/api", "/directory.html"]) {
+      for (const path of ["/", "/changes", "/models", "/providers", "/retiring", "/status", "/index", "/records", "/graveyard", "/benchmarks", "/about", "/api", "/directory.html"]) {
         urls.push({ loc: `${SITE}${path}`, lastmod: today });
       }
+      for (const b of BENCHMARKS) urls.push({ loc: `${SITE}/benchmarks?b=${b.slug}`, lastmod: today });
       const providers = new Set<string>();
       for (const row of models) {
         providers.add(String(row.provider).replace(/^~/, ""));
@@ -1634,7 +1754,21 @@ type RawLifecycle = {
 };
 
 /** What is diffed between sweeps of another catalogue. */
+type RawBenchmark = {
+  slug?: string;
+  benchmark?: string;
+  sourceModel?: string;
+  organization?: string;
+  score?: string | number;
+  unit?: string;
+  rank?: string;
+  detail?: string;
+  date?: string;
+  url?: string;
+};
+
 const SOURCE_FIELDS = ["name", "contextLength", "maxCompletion", "promptPrice", "completionPrice", "cacheReadPrice"] as const;
+const BENCHMARK_FIELDS = ["benchmark", "variant", "score", "unit", "rank", "detail", "date", "url"] as const;
 const HOST_FIELDS = ["host", "quantization", "contextLength", "maxCompletion", "promptPrice", "completionPrice", "cacheReadPrice"] as const;
 const LIFECYCLE_FIELDS = ["state", "deprecatedAt", "retiresAt", "retiresNote", "replacement"] as const;
 
@@ -2060,6 +2194,22 @@ function publicEvent(e: any) {
 function publicModel(row: any) {
   const { id, createdAt, updatedAt, fingerprint, schemaVersion, ...rest } = row;
   return rest as ModelRow;
+}
+
+function publicBenchmark(row: any) {
+  const { id, createdAt, updatedAt, fingerprint, rowKey, key, ...rest } = row;
+  return rest;
+}
+
+/**
+ * A model's current results across every leaderboard: rows filed under its loose key, plus
+ * rows whose source named no organisation, which are filed under "?/slug".
+ */
+async function benchmarksFor(ctx: Ctx, provider: string, modelId: string) {
+  const key = looseKey(provider, modelId);
+  const named = await ctx.db.benchmarks.withIndex("by_key", (range) => range.eq("key", key)).collect();
+  const unnamed = await ctx.db.benchmarks.withIndex("by_key", (range) => range.eq("key", `?/${looseSlug(modelId)}`)).collect();
+  return [...named, ...unnamed].filter((row) => row.active === true);
 }
 
 function escapeXml(value: string): string {

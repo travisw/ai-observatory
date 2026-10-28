@@ -3,7 +3,7 @@
  * The collector by hand, from any machine with node 18+, against any environment.
  *
  *   INGEST_TOKEN=... OBSERVATORY_URL=https://ai-observatory.view.fast \
- *     node collector/fetch-and-post.mjs [sweep|slow|daily|once|models|hosts|status|sources|lifecycle|backfill-litellm|rebuild-records]
+ *     node collector/fetch-and-post.mjs [sweep|slow|daily|benchmarks|once|models|hosts|status|sources|lifecycle|backfill-litellm|rebuild-records]
  *
  * The scheduled runs are the worker in `handler.mjs`; this is the same code with a prompt.
  */

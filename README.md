@@ -21,6 +21,7 @@ the capsule's mutations.
 | Provider status and incidents | Statuspage JSON for OpenAI, Anthropic, Groq, Cohere, Cerebras, Fireworks, Perplexity, Replicate; Google Cloud incidents | 1 h |
 | Market summary (median prices, frontier / mid / budget baskets) | computed from the archive | daily |
 | Open-weights attention, SDK downloads, repo stars | Hugging Face, npm, PyPI, GitHub | daily |
+| Published benchmark results (GPQA Diamond, SWE-bench Verified, FrontierMath, ARC-AGI-2, Humanity's Last Exam, and more) | Epoch AI's benchmarking hub (one zip of CSVs, CC BY 4.0); the LMArena text leaderboard (Hugging Face dataset, CC BY 4.0) | daily |
 
 Every source is public and keyless. Nothing is ever deleted: a model that leaves the catalogue
 keeps its history, and a notice that disappears from a deprecation page is recorded as withdrawn.
@@ -36,6 +37,11 @@ keeps its history, and a notice that disappears from a deprecation page is recor
 - **Provider pages**, **compare**, **status with 90-day history**, a **retirement calendar**, the
   **graveyard**, a **records page**, a daily **token price index**, and a **time machine** that
   rebuilds the catalogue as of any date.
+- **Benchmarks.** Published results from Epoch AI and LMArena, one benchmark at a time, with the
+  price tracked here beside each score, and each model's results on its own page. Nothing is run
+  here; a loose model key folds effort suffixes, dotted versions and dated snapshots so a source's
+  name lands on the right model page, and a name it cannot place is shown without a link rather
+  than guessed.
 - **Feeds and data.** `/feed.xml` (Atom, filterable with `?watch=claude,deepseek`), JSON at
   `/api/*.json`, CSV at `/export/changes.csv`, badges at `/badge.svg?model=…`, share cards at
   `/og/*.png`. All documented at `/api` on the site.
@@ -54,8 +60,8 @@ several megabytes each, more than the capsule runtime will hold in memory. Keepi
 outside the app also means the schedule, the retries and the source list can change without
 redeploying the site, and any job can be run by hand against any environment.
 
-The worker answers `/collect/sweep`, `/collect/slow` and `/collect/daily` for the scheduler,
-and any single job name. It accepts a request only with the scheduler's own `x-spacefast-cron`
+The worker answers `/collect/sweep`, `/collect/slow`, `/collect/daily` and `/collect/benchmarks`
+for the scheduler, and any single job name. It accepts a request only with the scheduler's own `x-spacefast-cron`
 header or the space's `CRON_SECRET` as a bearer token. `INGEST_TOKEN` on the collector space
 must match the one on the observatory.
 
@@ -79,7 +85,7 @@ By hand, from any machine with node 18+, against any environment:
 
 ```sh
 INGEST_TOKEN=... OBSERVATORY_URL=https://ai-observatory.view.fast \
-  node collector/fetch-and-post.mjs [sweep|slow|daily|once|models|hosts|status|sources|lifecycle]
+  node collector/fetch-and-post.mjs [sweep|slow|daily|benchmarks|once|models|hosts|status|sources|lifecycle]
 ```
 
 `backfill-litellm` replays the weekly history of LiteLLM's price file (back to 2023) into the

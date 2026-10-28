@@ -51,11 +51,13 @@ export function ApiPage() {
         <Rows label="JSON and CSV">
           <Row left="JSON" path="/api/changes.json" what="recent changes as stories, same filters as the feed" />
           <Row left="JSON" path="/api/models.json" what="every listed model with its current numbers" />
-          <Row left="JSON" path={`/api/model.json?id=${EXAMPLE}`} what="one model: current row, every change, hosts, lifecycle, other listings" />
+          <Row left="JSON" path={`/api/model.json?id=${EXAMPLE}`} what="one model: current row, every change, hosts, lifecycle, other listings, published benchmark results" />
           <Row left="JSON" path="/api/index.json" what="the token price index, daily" />
           <Row left="JSON" path="/api/status.json" what="provider status and incidents" />
           <Row left="JSON" path="/api/retiring.json" what="announced retirements and listing expiries" />
           <Row left="JSON" path="/api/records.json" what="the records" />
+          <Row left="JSON" path="/api/benchmarks.json" what="the leaderboards read, with their slugs" />
+          <Row left="JSON" path="/api/benchmarks.json?benchmark=gpqa-diamond" what="every current result on one benchmark, as published by Epoch AI or LMArena" />
           <Row left="CSV" path="/export/changes.csv" what="the newest thousand changes as CSV" />
         </Rows>
         <p class="note" style={{ marginTop: 10 }}>Prices in JSON are dollars per token, as the sources publish them; multiply by a million for the usual per-million figure. Times are UTC in ISO 8601.</p>
@@ -82,6 +84,7 @@ export function ApiPage() {
           <Row left="Page" path="/changes?kind=prices&provider=openai" what="filtered changes" />
           <Row left="Page" path="/compare?m=anthropic/claude-haiku-4.5,deepseek/deepseek-v4.1-flash" what="a comparison" />
           <Row left="Page" path="/time-machine?at=2026-09-15" what="the catalogue on a day" />
+          <Row left="Page" path="/benchmarks?b=swe-bench-verified&tracked=1" what="one benchmark, only the models priced here" />
           <Row left="Page" path={`/model/${EXAMPLE}?range=30d`} what="a model page with the chart range set" />
         </Rows>
       </Section>

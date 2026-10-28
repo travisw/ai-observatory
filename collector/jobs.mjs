@@ -10,6 +10,7 @@
  * No dependencies, no API keys: every source is public.
  */
 
+import { collectBenchmarks } from "./benchmarks.mjs";
 import { CHUNK, getJson, getText, sleep, withBackoff } from "./http.mjs";
 import { parseAnthropic, parseCohere, parseOpenAI } from "./lifecycle.mjs";
 
@@ -543,20 +544,23 @@ export const JOBS = {
   sources: collectSources,
   lifecycle: collectLifecycle,
   daily: collectDaily,
+  benchmarks: collectBenchmarks,
   "backfill-litellm": backfillLitellm,
   "rebuild-records": rebuildRecords,
 };
 
 /**
  * What the schedule runs. A sweep is the catalogue and the status pages; the slow set is
- * the sources that change daily at most. The backfill and the records rebuild only ever run
- * when named.
+ * the sources that change daily at most; the leaderboards are read once a day on their own
+ * schedule so a slow zip never delays the signals. The backfill and the records rebuild only
+ * ever run when named.
  */
 export const SCHEDULES = {
   sweep: ["models", "status"],
   slow: ["sources", "lifecycle", "hosts"],
   daily: ["daily"],
-  once: ["models", "status", "sources", "lifecycle", "hosts"],
+  benchmarks: ["benchmarks"],
+  once: ["models", "status", "sources", "lifecycle", "hosts", "benchmarks"],
 };
 
 /** Jobs that rewrite part of the archive. Never reachable from the worker, only from a prompt. */

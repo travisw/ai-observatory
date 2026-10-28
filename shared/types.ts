@@ -202,6 +202,35 @@ export type SourceEventRow = {
   newValue: string;
 };
 
+/** One published result: a score for a model on a benchmark, as a leaderboard reports it. */
+export type BenchmarkRow = {
+  id: string;
+  /** "epoch" | "lmarena". */
+  source: string;
+  /** The benchmark's slug, e.g. "gpqa-diamond". */
+  slug: string;
+  benchmark: string;
+  /** Loose `provider/slug` joined against the catalogue; "?/slug" when the source named no organisation. */
+  key: string;
+  provider: string;
+  /** The model exactly as the source names it. */
+  sourceModel: string;
+  /** Run setting split off the name: "max", "high 32k", "". */
+  variant: string;
+  score: string;
+  /** "pct" (0–100) | "elo" | "index". */
+  unit: string;
+  rank: string;
+  detail: string;
+  date: string;
+  url: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  active: boolean;
+};
+
+export type BenchmarkPageData = { slug: string; rows: BenchmarkRow[] };
+
 export type PollRow = { id: string; at: string; source: string; ok: boolean; note: string; ms: string };
 export type TrendRow = { id: string; at: string; rank: string; modelId: string; likes: string; downloads: string };
 export type PkgRow = { id: string; at: string; pkg: string; downloads: string };
@@ -218,6 +247,7 @@ export type ModelPageData = {
   lifecycle: LifecycleRow[];
   listings: SourceListing[];
   sourceEvents: SourceEventRow[];
+  benchmarks: BenchmarkRow[];
   family: ModelRow[];
 };
 
