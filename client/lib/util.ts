@@ -212,6 +212,7 @@ export function groupBy<T>(rows: T[], keyOf: (row: T) => string): Map<string, T[
   return out;
 }
 
-export function isLoading(value: unknown): boolean {
-  return Array.isArray(value) && value.length === 0;
+/** A query answers `undefined` until its first result arrives; an empty list keeps the skeleton too. */
+export function isLoading(value: unknown): value is undefined | null | never[] {
+  return value === undefined || value === null || (Array.isArray(value) && value.length === 0);
 }
