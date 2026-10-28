@@ -28,7 +28,10 @@ configure.
   starts as a guest; `<SignInWithGoogle />` from `@spacefast/zero/client`
   adds sign-in.
 - Server-only variables: read through `ctx.env`, define in `.env.server`.
-  They never reach the client or the build.
+  They never reach the client or the build. `sf publish` uploads every entry
+  of that file to the space as a secret and replaces what is stored there.
+  This project keeps its real secrets only on the platform (`sf env set`), so
+  delete a local-dev `.env.server` before any publish.
 - Outbound `fetch` works in every handler, but the capsule runtime holds very
   little memory: a response of a few hundred kilobytes fails. Anything that
   reads a whole catalogue lives in the collector worker, not here.

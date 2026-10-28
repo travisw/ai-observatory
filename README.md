@@ -105,4 +105,9 @@ sf publish      # deploy
 sf db migrate   # apply schema changes
 ```
 
+`sf dev` reads server variables from a local `.env.server`. `sf publish` uploads that file's
+entries to the space as secrets and replaces what is stored there, so delete a local-dev
+`.env.server` before publishing. The real `INGEST_TOKEN` and `CRON_SECRET` live only on the
+platform, set with `sf env set`.
+
 `AGENTS.md` is the guide for coding agents working in this capsule.
