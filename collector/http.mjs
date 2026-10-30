@@ -52,10 +52,12 @@ export const CHUNK = 40;
  * What every job needs from its surroundings: where the observatory is, the token its
  * ingest mutations check, and somewhere to write a line of progress.
  */
-export function makeContext({ base = "https://ai-observatory.view.fast", token, githubToken = "", log = console.log }) {
+export function makeContext({ base = "https://ai-observatory.view.fast", token, githubToken = "", deadline = Infinity, log = console.log }) {
   if (!token) throw new Error("INGEST_TOKEN is required.");
   return {
     githubToken,
+    /** When a job that can stop part way should stop. The worker's requests are cut off; a run by hand is not. */
+    deadline,
     log,
     /** Calls a capsule mutation over the same transport the browser uses. The token goes first, as every ingest mutation expects. */
     async mutate(name, ...args) {

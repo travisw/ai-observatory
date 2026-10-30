@@ -10,6 +10,8 @@
   // Schedules are named intervals (hourly, daily, Nh); the scheduler does not take crontab lines.
   "crons": [
     { "path": "/collect/sweep", "schedule": "hourly" },
+    // One stretch of the per-model host walk per run; the whole catalogue takes about six runs.
+    { "path": "/collect/hosts", "schedule": "hourly" },
     { "path": "/collect/slow", "schedule": "6h" },
     { "path": "/collect/daily", "schedule": "daily" },
     { "path": "/collect/benchmarks", "schedule": "daily" }

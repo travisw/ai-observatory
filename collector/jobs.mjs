@@ -99,16 +99,23 @@ function trimEndpoint(e) {
 
 /**
  * One request per model for its hosting endpoints: which companies actually serve it, at
- * what price and quantization, and how reliably. Spaced out because it is 450-odd calls.
+ * what price and quantization, and how reliably. Spaced out because it is 450-odd calls,
+ * which takes longer than one worker request may run. So the walk goes through the catalogue
+ * in id order, stops at the context's deadline, and the next run continues after the last
+ * model read. Each model's list is complete on its own, so a walk cut short loses nothing.
  */
 async function collectHosts(c) {
   const catalogue = await withBackoff(() => getJson(OPENROUTER_MODELS));
-  const ids = (catalogue?.data ?? []).map((m) => m.id).filter(Boolean);
+  const ids = (catalogue?.data ?? []).map((m) => m.id).filter(Boolean).sort();
   if (ids.length === 0) throw new Error("openrouter returned an empty catalogue");
 
+  const { cursor } = await c.mutate("hostsCursor");
+  // The first id after the last one read. Past the end of the list, or on a first run, the walk starts over.
+  const start = Math.max(0, ids.findIndex((id) => id > cursor));
   const runAt = new Date().toISOString();
   const HOST_CHUNK = 8;
   let batch = [];
+  let last = cursor;
   let models = 0;
   let endpoints = 0;
   let skipped = 0;
@@ -123,7 +130,9 @@ async function collectHosts(c) {
     batch = [];
   };
 
-  for (const id of ids) {
+  for (let step = 0; step < ids.length && Date.now() < c.deadline; step++) {
+    const id = ids[(start + step) % ids.length];
+    last = id;
     await sleep(150);
     let body;
     try {
@@ -142,8 +151,10 @@ async function collectHosts(c) {
     if (batch.length >= HOST_CHUNK) await flush();
   }
   await flush();
-  await c.mutate("finalizeHosts", runAt, models, Date.now() - Date.parse(runAt));
-  c.log(`hosts: ${models} models, ${endpoints} endpoints, ${skipped} skipped, +${totals.added} ~${totals.changed} -${totals.removed}`);
+  await c.mutate("finalizeHosts", runAt, models, Date.now() - Date.parse(runAt), last);
+  c.log(
+    `hosts: ${models} of ${ids.length} models, ${endpoints} endpoints, ${skipped} skipped, +${totals.added} ~${totals.changed} -${totals.removed}, stopped after ${last}`
+  );
 }
 
 /**
@@ -551,13 +562,15 @@ export const JOBS = {
 
 /**
  * What the schedule runs. A sweep is the catalogue and the status pages; the slow set is
- * the sources that change daily at most; the leaderboards are read once a day on their own
- * schedule so a slow zip never delays the signals. The backfill and the records rebuild only
- * ever run when named.
+ * the sources that change daily at most; the hosts walk runs hourly on its own, one stretch
+ * of the catalogue per run; the leaderboards are read once a day on their own schedule so a
+ * slow zip never delays the signals. The backfill and the records rebuild only ever run when
+ * named.
  */
 export const SCHEDULES = {
   sweep: ["models", "status"],
-  slow: ["sources", "lifecycle", "hosts"],
+  slow: ["sources", "lifecycle"],
+  hosts: ["hosts"],
   daily: ["daily"],
   benchmarks: ["benchmarks"],
   once: ["models", "status", "sources", "lifecycle", "hosts", "benchmarks"],

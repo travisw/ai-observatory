@@ -15,7 +15,7 @@ the capsule's mutations.
 | Signal | Source | Cadence |
 |---|---|---|
 | Catalogue, prices, context, long-context tiers, alias targets, expiry dates, capability flags for ~460 models | OpenRouter `/api/v1/models` | 1 h |
-| Which hosts serve each model, at what price, quantization and uptime | OpenRouter `/api/v1/models/{id}/endpoints` | 6 h |
+| Which hosts serve each model, at what price, quantization and uptime | OpenRouter `/api/v1/models/{id}/endpoints` | ~6 h, a stretch of the catalogue each hour |
 | First-party price lists, for cross-checking | models.dev, LiteLLM | 6 h |
 | Deprecation and retirement notices | OpenAI, Anthropic and Cohere deprecation pages; LiteLLM and models.dev flags | 6 h |
 | Provider status and incidents | Statuspage JSON for OpenAI, Anthropic, Groq, Cohere, Cerebras, Fireworks, Perplexity, Replicate; Google Cloud incidents | 1 h |
@@ -60,8 +60,10 @@ several megabytes each, more than the capsule runtime will hold in memory. Keepi
 outside the app also means the schedule, the retries and the source list can change without
 redeploying the site, and any job can be run by hand against any environment.
 
-The worker answers `/collect/sweep`, `/collect/slow`, `/collect/daily` and `/collect/benchmarks`
-for the scheduler, and any single job name. It accepts a request only with the scheduler's own `x-spacefast-cron`
+The worker answers `/collect/sweep`, `/collect/hosts`, `/collect/slow`, `/collect/daily` and
+`/collect/benchmarks` for the scheduler, and any single job name. The platform ends a worker
+request after 30 seconds, so the per-model hosts walk, about 450 requests, reads for 18 seconds,
+saves the last model it read on the observatory, and the next run continues from there. It accepts a request only with the scheduler's own `x-spacefast-cron`
 header or the space's `CRON_SECRET` as a bearer token. `INGEST_TOKEN` on the collector space
 must match the one on the observatory.
 

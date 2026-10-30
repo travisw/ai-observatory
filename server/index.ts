@@ -356,6 +356,13 @@ export default capsule({
       ms: string(),
     }).index("by_at", ["at"]),
 
+    /** Where a walk longer than one collector run stopped, so the next run continues from there. */
+    cursors: table({
+      job: string(),
+      cursor: string(),
+      at: string(),
+    }).index("by_job", ["job"]),
+
     /**
      * Published benchmark results, one row per (leaderboard, benchmark, model as the source
      * names it). `key` is the loose model key the catalogue is joined on; `rowKey` is the
@@ -388,9 +395,6 @@ export default capsule({
   },
 
   queries: {
-    recentEvents: query(async (ctx) =>
-      ctx.db.events.withIndex("by_at").order("desc").take(60)
-    ),
     activeModels: query(async (ctx) =>
       ctx.db.models.withIndex("by_active", (range) => range.eq("active", true)).order("asc").take(1000)
     ),
@@ -399,9 +403,6 @@ export default capsule({
     ),
     statuses: query(async (ctx) =>
       ctx.db.providerStatus.withIndex("by_provider").order("asc").take(50)
-    ),
-    statusHistory: query(async (ctx) =>
-      ctx.db.statusEvents.withIndex("by_at").order("desc").take(30)
     ),
     latestTrending: query(async (ctx) =>
       ctx.db.trending.withIndex("by_at").order("desc").take(25)
@@ -499,30 +500,6 @@ export default capsule({
       ctx.db.lifecycleEvents.withIndex("by_at").order("desc").take(200)
     ),
 
-    /** Catalogue size at each successful sweep, oldest first, for the trend line. */
-    sweepSizes: query(async (ctx) => {
-      const rows = await ctx.db.polls.withIndex("by_at").order("desc").take(400);
-      const out: { at: string; listed: number }[] = [];
-      for (const row of rows) {
-        if (row.source !== "models" || row.ok !== true) continue;
-        const match = /(\d+) listed/.exec(String(row.note ?? ""));
-        if (match) out.push({ at: String(row.at), listed: Number(match[1]) });
-      }
-      return out.reverse();
-    }),
-
-    /** Everything that ever happened to one model, oldest first, plus its current row. */
-    modelHistory: query(async (ctx, modelId: string) => {
-      const model = await ctx.db.models
-        .withIndex("by_model", (range) => range.eq("modelId", modelId))
-        .first();
-      const events = await ctx.db.events
-        .withIndex("by_model", (range) => range.eq("modelId", modelId))
-        .order("asc")
-        .collect();
-      return { model, events };
-    }),
-
     /** The model page in one subscription: the row, its archive, hosts, notices, and family. */
     modelPage: query(async (ctx, modelId: string) => {
       const model = await ctx.db.models.withIndex("by_model", (range) => range.eq("modelId", modelId)).first();
@@ -605,14 +582,6 @@ export default capsule({
       return ctx.db.daily.withIndex("by_date", (range) => range.gte("date", since)).order("asc").take(1000);
     }),
 
-    providerDaily: query(async (ctx, provider: string, days: number) => {
-      const since = new Date(Date.now() - Math.min(Math.max(days || 90, 1), 1000) * DAY).toISOString().slice(0, 10);
-      return ctx.db.providerDaily
-        .withIndex("by_provider_date", (range) => range.eq("provider", canonicalProvider(provider)).gte("date", since))
-        .order("asc")
-        .take(1000);
-    }),
-
     records: query(async (ctx) => {
       const stored = await ctx.db.records.withIndex("by_key").order("asc").take(50);
       // Longest unchanged is a property of the present, so it is computed, not stored.
@@ -639,22 +608,6 @@ export default capsule({
         });
       }
       return out;
-    }),
-
-    cheapestEver: query(async (ctx) => {
-      const active = await ctx.db.models.withIndex("by_active", (range) => range.eq("active", true)).take(1000);
-      return active
-        .filter(
-          (row) =>
-            !isAlias(String(row.modelId)) &&
-            Number(row.changeCount) > 0 &&
-            Number(row.promptPrice) > 0 &&
-            row.lowInput !== "" &&
-            Number(row.promptPrice) <= Number(row.lowInput) &&
-            Number(row.highInput) > Number(row.lowInput)
-        )
-        .sort((a, b) => String(b.lowInputAt).localeCompare(String(a.lowInputAt)))
-        .slice(0, 50);
     }),
 
     retiring: query(async (ctx) => {
@@ -722,18 +675,6 @@ export default capsule({
         out.push({ modelId, cheapestHost: String(cheapest.host), cheapestIn: String(cheapest.promptPrice), hosts: String(list.length) });
       }
       return out;
-    }),
-
-    /** Other catalogues' listings for one canonical key, with everything that changed there. */
-    crossSources: query(async (ctx, key: string) => {
-      const listings = await ctx.db.sourceModels
-        .withIndex("by_key", (range) => range.eq("key", key))
-        .collect();
-      const events = await ctx.db.sourceEvents
-        .withIndex("by_key", (range) => range.eq("key", key))
-        .order("asc")
-        .collect();
-      return { listings, events };
     }),
 
     recentSourceEvents: query(async (ctx) =>
@@ -1000,10 +941,21 @@ export default capsule({
       return { ok: true, added, changed, removed };
     }),
 
-    /** Marks the end of a hosts run so freshness can report it. */
-    finalizeHosts: mutation(async (ctx, token: string, runAt: string, models: number, ms: number) => {
+    /** The last model the hosts walk read, or "" before the first run. */
+    hostsCursor: mutation(async (ctx, token: string) => {
       if (!allowed(ctx, token)) return { ok: false, error: "unauthorized" };
-      await ctx.db.polls.insert({ at: runAt || now(), source: "hosts", ok: true, note: `${models} models' hosts read`, ms: String(ms ?? 0) });
+      const row = await ctx.db.cursors.withIndex("by_job", (range) => range.eq("job", "hosts")).first();
+      return { ok: true, cursor: row ? String(row.cursor) : "" };
+    }),
+
+    /** Marks the end of a hosts run so freshness can report it, and saves where the walk stopped. */
+    finalizeHosts: mutation(async (ctx, token: string, runAt: string, models: number, ms: number, cursor: string) => {
+      if (!allowed(ctx, token)) return { ok: false, error: "unauthorized" };
+      const at = runAt || now();
+      const row = await ctx.db.cursors.withIndex("by_job", (range) => range.eq("job", "hosts")).first();
+      if (row) await ctx.db.cursors.update(row.id, { cursor, at });
+      else await ctx.db.cursors.insert({ job: "hosts", cursor, at });
+      await ctx.db.polls.insert({ at, source: "hosts", ok: true, note: `${models} models' hosts read`, ms: String(ms ?? 0) });
       return { ok: true };
     }),
 
