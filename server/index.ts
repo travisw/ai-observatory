@@ -56,6 +56,23 @@ function allowed(ctx: { env: Record<string, string | undefined> }, token: string
   return Boolean(expected) && token === expected;
 }
 
+/** The later of two ISO timestamps, so an older overlapping run never winds a last-seen time back. */
+function later(a: string, b: string): string {
+  return a > b ? a : b;
+}
+
+/** Marks a model's hosts as no longer serving it, without events: the model's own removal is the story. */
+async function retireHosts(ctx: Ctx, modelId: string) {
+  const hosts = await ctx.db.hosts.withIndex("by_model", (range: any) => range.eq("modelId", modelId)).collect();
+  for (const host of hosts) if (host.active === true) await ctx.db.hosts.update(host.id, { active: false });
+}
+
+/** The rows of the newest daily snapshot, from rows read newest first. One daily run writes one `at` for all its rows. */
+function newestSnapshot<T extends { at: unknown }>(rows: T[]): T[] {
+  const at = rows[0]?.at;
+  return rows.filter((row) => row.at === at);
+}
+
 export default capsule({
   name: "AI Observatory",
 
@@ -118,7 +135,8 @@ export default capsule({
       .index("by_at", ["at"])
       .index("by_model", ["modelId"])
       .index("by_kind", ["kind"])
-      .index("by_provider_at", ["provider", "at"]),
+      .index("by_provider_at", ["provider", "at"])
+      .index("by_field_at", ["field", "at"]),
 
     /** Where each model is served from, one row per (model, host endpoint). */
     hosts: table({
@@ -404,21 +422,25 @@ export default capsule({
     statuses: query(async (ctx) =>
       ctx.db.providerStatus.withIndex("by_provider").order("asc").take(50)
     ),
-    latestTrending: query(async (ctx) =>
-      ctx.db.trending.withIndex("by_at").order("desc").take(25)
-    ),
-    latestPackages: query(async (ctx) =>
-      ctx.db.packages.withIndex("by_at").order("desc").take(20)
-    ),
-    latestPypi: query(async (ctx) =>
-      ctx.db.pypi.withIndex("by_at").order("desc").take(20)
-    ),
-    latestRepos: query(async (ctx) =>
-      ctx.db.repos.withIndex("by_at").order("desc").take(20)
-    ),
-    recentPolls: query(async (ctx) =>
-      ctx.db.polls.withIndex("by_at").order("desc").take(20)
-    ),
+    /**
+     * Pulse in one subscription: the newest daily snapshot of each list, and the collector's
+     * recent record. Each list is cut to its own newest snapshot, so a source that failed on the
+     * latest day still shows its last good one, with that snapshot's date.
+     */
+    pulsePage: query(async (ctx) => {
+      const trending = newestSnapshot(await ctx.db.trending.withIndex("by_at").order("desc").take(50));
+      const packages = newestSnapshot(await ctx.db.packages.withIndex("by_at").order("desc").take(20));
+      const pypi = newestSnapshot(await ctx.db.pypi.withIndex("by_at").order("desc").take(20));
+      const repos = newestSnapshot(await ctx.db.repos.withIndex("by_at").order("desc").take(20));
+      const polls = await ctx.db.polls.withIndex("by_at").order("desc").take(20);
+      return {
+        trending: trending.sort((a, b) => Number(a.rank) - Number(b.rank)),
+        packages: packages.sort((a, b) => Number(b.downloads) - Number(a.downloads)),
+        pypi: pypi.sort((a, b) => Number(b.lastWeek) - Number(a.lastWeek)),
+        repos: repos.sort((a, b) => Number(b.stars) - Number(a.stars)),
+        polls,
+      };
+    }),
 
     /**
      * Everything the home page needs in one subscription, so a first visit is one request
@@ -476,29 +498,85 @@ export default capsule({
       };
     }),
 
-    /** Paged archive, newest first. `cursor` is null for the first page. */
-    eventsPage: query(async (ctx, cursor: string | null) =>
-      ctx.db.events.withIndex("by_at").order("desc").paginate({ cursor: cursor ?? null, numItems: 150 })
-    ),
+    /**
+     * The Changes page in one subscription. Each page is 150 more archive events, newest first. Host, notice
+     * and price-list events come from the same stretch of time, so no filter shows more history than was
+     * loaded. `from` is where that stretch starts ("" when it reaches the start of the record) and `more`
+     * says whether anything older exists.
+     */
+    changesPage: query(async (ctx, provider: string, pages: number) => {
+      const limit = Math.max(1, Math.min(10, Math.floor(Number(pages)) || 1)) * 150;
+      const archive = provider
+        ? await ctx.db.events.withIndex("by_provider_at", (range) => range.eq("provider", provider)).order("desc").take(limit + 1)
+        : await ctx.db.events.withIndex("by_at").order("desc").take(limit + 1);
+      let more = archive.length > limit;
+      const events = archive.slice(0, limit);
+      let from = more && events.length ? String(events[events.length - 1].at) : "";
+      // Each other kind is read from `from` on. A read that fills its cap means the stretch is shorter
+      // than the archive part; it then starts where that read runs out.
+      const stretch = async <T extends { at: unknown }>(read: (since: string) => Promise<T[]>, cap: number): Promise<T[]> => {
+        const rows = await read(from);
+        if (rows.length >= cap) {
+          from = later(from, String(rows[rows.length - 1].at));
+          more = true;
+        }
+        return rows;
+      };
+      const hostEvents = await stretch((since) => (since ? ctx.db.hostEvents.withIndex("by_at", (range) => range.gte("at", since)) : ctx.db.hostEvents.withIndex("by_at")).order("desc").take(1000), 1000);
+      const lifecycleEvents = await stretch((since) => (since ? ctx.db.lifecycleEvents.withIndex("by_at", (range) => range.gte("at", since)) : ctx.db.lifecycleEvents.withIndex("by_at")).order("desc").take(400), 400);
+      const sourceEvents = await stretch((since) => (since ? ctx.db.sourceEvents.withIndex("by_at", (range) => range.gte("at", since)) : ctx.db.sourceEvents.withIndex("by_at")).order("desc").take(400), 400);
+      const within = <T extends { at: unknown }>(rows: T[]) => (from ? rows.filter((row) => String(row.at) >= from) : rows);
+      return { events: within(events), hostEvents: within(hostEvents), lifecycleEvents: within(lifecycleEvents), sourceEvents: within(sourceEvents), from, more };
+    }),
 
-    eventsByProvider: query(async (ctx, provider: string, cursor: string | null) =>
-      ctx.db.events
-        .withIndex("by_provider_at", (range) => range.eq("provider", provider))
-        .order("desc")
-        .paginate({ cursor: cursor ?? null, numItems: 150 })
-    ),
+    /**
+     * Input-price moves over the last `days`, for the catalogue's sparklines. Read through the field index
+     * a page at a time, since a busy fortnight holds more events than one read. A model that moved more
+     * than 40 times keeps 40 evenly spread moves and its latest, which is all a 64-pixel line can show.
+     */
+    priceTrail: query(async (ctx, days: number) => {
+      const since = new Date(Date.now() - Math.min(Math.max(Number(days) || 90, 1), 365) * DAY).toISOString();
+      const byModel = new Map<string, { at: string; oldValue: string; newValue: string }[]>();
+      let cursor: string | null = null;
+      for (;;) {
+        const page = await ctx.db.events
+          .withIndex("by_field_at", (range) => range.eq("field", "promptPrice").gte("at", since))
+          .order("asc")
+          .paginate({ cursor, numItems: 500 });
+        for (const e of page.page) {
+          if (e.kind !== "changed") continue;
+          const list = byModel.get(String(e.modelId)) ?? [];
+          list.push({ at: String(e.at), oldValue: String(e.oldValue), newValue: String(e.newValue) });
+          byModel.set(String(e.modelId), list);
+        }
+        if (page.isDone || !page.continueCursor) break;
+        cursor = page.continueCursor;
+      }
+      const out: { modelId: string; kind: string; field: string; at: string; oldValue: string; newValue: string }[] = [];
+      for (const [modelId, list] of byModel) {
+        const step = Math.ceil(list.length / 40);
+        const keep = step <= 1 ? list : list.filter((_, i) => i % step === 0 || i === list.length - 1);
+        for (const e of keep) out.push({ modelId, kind: "changed", field: "promptPrice", ...e });
+      }
+      return out;
+    }),
 
-    /** Everything since a moment, newest first, capped at the runtime's page size. */
-    eventsSince: query(async (ctx, sinceIso: string) =>
-      ctx.db.events.withIndex("by_at", (range) => range.gte("at", sinceIso)).order("desc").take(1000)
-    ),
-
-    recentHostEvents: query(async (ctx) =>
-      ctx.db.hostEvents.withIndex("by_at").order("desc").take(200)
-    ),
-    recentLifecycleEvents: query(async (ctx) =>
-      ctx.db.lifecycleEvents.withIndex("by_at").order("desc").take(200)
-    ),
+    /** How many archive events each provider had in the last `days`, counted a page at a time. */
+    providerChanges: query(async (ctx, days: number) => {
+      const since = new Date(Date.now() - Math.min(Math.max(Number(days) || 7, 1), 90) * DAY).toISOString();
+      const counts: Record<string, number> = {};
+      let cursor: string | null = null;
+      for (;;) {
+        const page = await ctx.db.events.withIndex("by_at", (range) => range.gte("at", since)).paginate({ cursor, numItems: 500 });
+        for (const e of page.page) {
+          const slug = String(e.provider).replace(/^~/, "");
+          counts[slug] = (counts[slug] ?? 0) + 1;
+        }
+        if (page.isDone || !page.continueCursor) break;
+        cursor = page.continueCursor;
+      }
+      return counts;
+    }),
 
     /** The model page in one subscription: the row, its archive, hosts, notices, and family. */
     modelPage: query(async (ctx, modelId: string) => {
@@ -659,27 +737,40 @@ export default capsule({
       return { at, models, walked };
     }),
 
+    /**
+     * Per model served by two or more hosts: how many, and the cheapest. Reads every active host a
+     * page at a time, keeping only a running tally, since there are more of them than one read holds.
+     */
     hostsOverview: query(async (ctx) => {
-      const rows = await ctx.db.hosts.withIndex("by_active", (range) => range.eq("active", true)).take(1000);
-      const byModel = new Map<string, typeof rows>();
-      for (const row of rows) {
-        const list = byModel.get(String(row.modelId));
-        if (list) list.push(row);
-        else byModel.set(String(row.modelId), [row]);
+      const byModel = new Map<string, { hosts: number; cheapestHost: string; cheapestIn: string }>();
+      let cursor: string | null = null;
+      for (;;) {
+        const page = await ctx.db.hosts.withIndex("by_active", (range) => range.eq("active", true)).paginate({ cursor, numItems: 500 });
+        for (const row of page.page) {
+          const modelId = String(row.modelId);
+          const price = Number(row.promptPrice);
+          const entry = byModel.get(modelId);
+          if (!entry) {
+            byModel.set(modelId, { hosts: 1, cheapestHost: String(row.host), cheapestIn: String(row.promptPrice) });
+            continue;
+          }
+          entry.hosts++;
+          const best = Number(entry.cheapestIn);
+          if (price > 0 && (!(best > 0) || price < best)) {
+            entry.cheapestHost = String(row.host);
+            entry.cheapestIn = String(row.promptPrice);
+          }
+        }
+        if (page.isDone || !page.continueCursor) break;
+        cursor = page.continueCursor;
       }
       const out: { modelId: string; cheapestHost: string; cheapestIn: string; hosts: string }[] = [];
-      for (const [modelId, list] of byModel) {
-        if (list.length < 2) continue;
-        const priced = list.filter((row) => Number(row.promptPrice) > 0).sort((a, b) => Number(a.promptPrice) - Number(b.promptPrice));
-        const cheapest = priced[0] ?? list[0];
-        out.push({ modelId, cheapestHost: String(cheapest.host), cheapestIn: String(cheapest.promptPrice), hosts: String(list.length) });
+      for (const [modelId, entry] of byModel) {
+        if (entry.hosts < 2) continue;
+        out.push({ modelId, cheapestHost: entry.cheapestHost, cheapestIn: entry.cheapestIn, hosts: String(entry.hosts) });
       }
       return out;
     }),
-
-    recentSourceEvents: query(async (ctx) =>
-      ctx.db.sourceEvents.withIndex("by_at").order("desc").take(200)
-    ),
 
     /** Most recent successful run per source, so the console can say how fresh it is. */
     freshness: query(async (ctx) => {
@@ -770,7 +861,7 @@ export default capsule({
 
         if (prior.fingerprint === fingerprint && prior.active === true && !upgrading) {
           await ctx.db.models.update(prior.id, {
-            lastSeenAt: at,
+            lastSeenAt: later(String(prior.lastSeenAt ?? ""), at),
             ...untracked(model),
             ...(correctedFirstSeen ? { firstSeenAt: correctedFirstSeen } : {}),
           });
@@ -825,7 +916,7 @@ export default capsule({
           ...stats,
           schemaVersion: SCHEMA_VERSION,
           fingerprint,
-          lastSeenAt: at,
+          lastSeenAt: later(String(prior.lastSeenAt ?? ""), at),
           active: true,
           ...(correctedFirstSeen ? { firstSeenAt: correctedFirstSeen } : {}),
         });
@@ -851,8 +942,11 @@ export default capsule({
       }
       for (const row of rows) {
         if (row.active === false) continue;
-        if (String(row.lastSeenAt ?? "") === at) continue;
+        // Seen by this sweep or a later one. Only rows last seen before this sweep began are gone; an
+        // overlapping sweep that stamped a newer time must not make them look absent.
+        if (String(row.lastSeenAt ?? "") >= at) continue;
         await ctx.db.models.update(row.id, { active: false });
+        await retireHosts(ctx, String(row.modelId));
         await ctx.db.events.insert({
           at,
           kind: "removed",
@@ -867,6 +961,13 @@ export default capsule({
           await bumpRecord(ctx, "shortest-lived", { modelId: String(row.modelId), provider: String(row.provider), value: String(lived), at, detail: `listed ${longDate(String(row.firstSeenAt))}, removed ${longDate(at)}` }, (a, b) => a < b);
         }
         removed++;
+      }
+
+      // Models retired before their hosts were retired with them still show hosts serving them. Clear those once.
+      const cleared = await ctx.db.cursors.withIndex("by_job", (range) => range.eq("job", "retired-hosts")).first();
+      if (!cleared) {
+        for (const row of rows) if (row.active === false) await retireHosts(ctx, String(row.modelId));
+        await ctx.db.cursors.insert({ job: "retired-hosts", cursor: "done", at });
       }
 
       await ctx.db.polls.insert({
@@ -1055,7 +1156,7 @@ export default capsule({
         .withIndex("by_source", (range) => range.eq("source", source))
         .collect();
       for (const row of rows) {
-        if (row.active === false || String(row.lastSeenAt ?? "") === at) continue;
+        if (row.active === false || String(row.lastSeenAt ?? "") >= at) continue;
         await ctx.db.sourceModels.update(row.id, { active: false });
         await ctx.db.sourceEvents.insert({
           at, source, kind: "removed", key: String(row.key), sourceId: String(row.sourceId), provider: String(row.provider),
@@ -1159,14 +1260,14 @@ export default capsule({
       const at = runAt || now();
       let removed = 0;
       const rows = await ctx.db.lifecycle.withIndex("by_source", (range) => range.eq("source", source)).collect();
-      const touched = rows.filter((row) => String(row.lastSeenAt ?? "") === at).length;
+      const touched = rows.filter((row) => String(row.lastSeenAt ?? "") >= at).length;
       // An empty run means the page could not be parsed, not that every notice was withdrawn.
       if (touched === 0 && rows.length > 0) {
         await ctx.db.polls.insert({ at, source: `lifecycle:${source}`, ok: false, note: "no rows this run; nothing retired", ms: String(Date.now() - started) });
         return { ok: true, removed: 0, ignored: true };
       }
       for (const row of rows) {
-        if (row.active === false || String(row.lastSeenAt ?? "") === at) continue;
+        if (row.active === false || String(row.lastSeenAt ?? "") >= at) continue;
         await ctx.db.lifecycle.update(row.id, { active: false });
         await ctx.db.lifecycleEvents.insert({ at, source, provider: String(row.provider), modelId: String(row.modelId), key: String(row.key), kind: "removed", field: "", oldValue: String(row.state), newValue: "" });
         removed++;
@@ -1229,6 +1330,17 @@ export default capsule({
             .first();
           if (existing) await ctx.db.incidents.update(existing.id, row);
           else await ctx.db.incidents.insert(row);
+        }
+
+        // A status page lists every open incident, so one stored as open but missing from a good read
+        // has closed. Its last recorded update is the best end time known.
+        if (indicator !== "unreachable") {
+          const reported = new Set((source.incidents ?? []).map((incident) => String(incident?.id ?? "")));
+          const stored = await ctx.db.incidents.withIndex("by_provider_incident", (range) => range.eq("provider", source.provider)).collect();
+          for (const row of stored) {
+            if (row.resolvedAt || reported.has(String(row.incidentId))) continue;
+            await ctx.db.incidents.update(row.id, { resolvedAt: String(row.lastUpdateAt || at), status: "resolved" });
+          }
         }
       }
 
@@ -1323,6 +1435,7 @@ export default capsule({
       if (!allowed(ctx, token)) return { ok: false, error: "unauthorized" };
       const day = date && date.length === 10 ? date : now().slice(0, 10);
       const result = await rollup(ctx, day);
+      await repairOnce(ctx);
       return { ok: true, ...result };
     }),
 
@@ -1383,7 +1496,7 @@ export default capsule({
       for (;;) {
         const page = await ctx.db.benchmarks.withIndex("by_source", (range) => range.eq("source", source)).paginate({ cursor, numItems: 200 });
         for (const row of page.page) {
-          if (row.active === false || String(row.lastSeenAt ?? "") === at) continue;
+          if (row.active === false || String(row.lastSeenAt ?? "") >= at) continue;
           await ctx.db.benchmarks.update(row.id, { active: false });
           removed++;
         }
@@ -1518,7 +1631,7 @@ ${entries}
       const today = now().slice(0, 10);
       const models = await ctx.db.models.withIndex("by_active", (range) => range.eq("active", true)).take(1000);
       const urls: { loc: string; lastmod: string }[] = [];
-      for (const path of ["/", "/changes", "/models", "/providers", "/retiring", "/status", "/index", "/records", "/graveyard", "/benchmarks", "/about", "/api", "/directory.html"]) {
+      for (const path of ["/", "/changes", "/models", "/providers", "/retiring", "/status", "/price-index", "/records", "/graveyard", "/benchmarks", "/about", "/api", "/directory.html"]) {
         urls.push({ loc: `${SITE}${path}`, lastmod: today });
       }
       for (const b of BENCHMARKS) urls.push({ loc: `${SITE}/benchmarks?b=${b.slug}`, lastmod: today });
@@ -1930,7 +2043,8 @@ async function noteRecords(ctx: Ctx, model: TrackedModel, field: string, before:
   if (!Number.isFinite(x) || !Number.isFinite(y)) return;
   const who = { modelId: model.modelId, provider: model.provider, at };
   if (field === "contextLength") {
-    if (y > x) await bumpRecord(ctx, "largest-context-jump", { ...who, value: String(y), detail: `${formatContext(before)} → ${formatContext(after)}` }, (a, b) => a > b);
+    // From an unknown size (0) is a first reading, not an increase.
+    if (x > 0 && y > x) await bumpRecord(ctx, "largest-context-jump", { ...who, value: String(y - x), detail: `${formatContext(before)} → ${formatContext(after)}` }, (a, b) => a > b);
     return;
   }
   if (x < MIN_RECORD_PRICE || y < MIN_RECORD_PRICE) return;
@@ -1987,7 +2101,7 @@ async function rebuildRecordsPage(ctx: Ctx, cursor: string | null) {
       if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
       const who = { modelId: model.modelId, provider: model.provider, at: String(e.at) };
       if (e.field === "contextLength") {
-        if (y > x) await bumpRecord(ctx, "largest-context-jump", { ...who, value: String(y), detail: `${formatContext(String(e.oldValue))} → ${formatContext(String(e.newValue))}` }, (a, b) => a > b);
+        if (x > 0 && y > x) await bumpRecord(ctx, "largest-context-jump", { ...who, value: String(y - x), detail: `${formatContext(String(e.oldValue))} → ${formatContext(String(e.newValue))}` }, (a, b) => a > b);
         continue;
       }
       if (x < MIN_RECORD_PRICE || y < MIN_RECORD_PRICE) continue;
@@ -2025,6 +2139,54 @@ async function noteCheapestListed(ctx: Ctx, model: TrackedModel, at: string) {
   await bumpRecord(ctx, "cheapest-listed-ever", { modelId: model.modelId, provider: model.provider, at, value: model.promptPrice, detail: `${money(model.promptPrice)} per million input` }, (a, b) => a < b);
 }
 
+/** Archive events on one UTC day, counted a page at a time. */
+async function countEvents(ctx: Ctx, day: string): Promise<number> {
+  let count = 0;
+  let cursor: string | null = null;
+  for (;;) {
+    const page: any = await ctx.db.events
+      .withIndex("by_at", (range: any) => range.gte("at", `${day}T00:00:00.000Z`).lte("at", `${day}T23:59:59.999Z`))
+      .paginate({ cursor, numItems: 1000 });
+    count += page.page.length;
+    if (page.isDone || !page.continueCursor) return count;
+    cursor = page.continueCursor;
+  }
+}
+
+/**
+ * Repairs to stored data that earlier code got wrong, each run once and remembered in `cursors`:
+ * the context record held the new size rather than the increase, and each day's change count was
+ * taken part way through the day.
+ */
+async function repairOnce(ctx: Ctx) {
+  const done = async (job: string) => Boolean(await ctx.db.cursors.withIndex("by_job", (range: any) => range.eq("job", job)).first());
+  const mark = (job: string) => ctx.db.cursors.insert({ job, cursor: "done", at: now() });
+
+  if (!(await done("context-record"))) {
+    const stale = await ctx.db.records.withIndex("by_key", (range: any) => range.eq("key", "largest-context-jump")).collect();
+    for (const row of stale) await ctx.db.records.delete(row.id);
+    let cursor: string | null = null;
+    for (;;) {
+      const page: any = await ctx.db.events.withIndex("by_field_at", (range: any) => range.eq("field", "contextLength")).paginate({ cursor, numItems: 500 });
+      for (const e of page.page) {
+        const x = Number(e.oldValue);
+        const y = Number(e.newValue);
+        if (e.kind !== "changed" || isAlias(String(e.modelId)) || !(x > 0) || !(y > x)) continue;
+        await bumpRecord(ctx, "largest-context-jump", { modelId: String(e.modelId), provider: String(e.provider), value: String(y - x), at: String(e.at), detail: `${formatContext(String(e.oldValue))} → ${formatContext(String(e.newValue))}` }, (a, b) => a > b);
+      }
+      if (page.isDone || !page.continueCursor) break;
+      cursor = page.continueCursor;
+    }
+    await mark("context-record");
+  }
+
+  if (!(await done("daily-changes"))) {
+    const days = await ctx.db.daily.withIndex("by_date").take(1000);
+    for (const row of days) await ctx.db.daily.update(row.id, { changes: String(await countEvents(ctx, String(row.date))) });
+    await mark("daily-changes");
+  }
+}
+
 /** The day's market summary. Written once per date and overwritten when run again. */
 async function rollup(ctx: Ctx, day: string) {
   const active = await ctx.db.models.withIndex("by_active", (range: any) => range.eq("active", true)).take(1000);
@@ -2046,9 +2208,7 @@ async function rollup(ctx: Ctx, day: string) {
   const mid = scored.slice(15, 45);
   const budget = scored.slice(45);
   const cheapestFrontier = frontier.slice().sort((a: any, b: any) => blendedPerMillion(a.promptPrice, a.completionPrice) - blendedPerMillion(b.promptPrice, b.completionPrice))[0];
-  const dayStart = `${day}T00:00:00.000Z`;
-  const dayEnd = `${day}T23:59:59.999Z`;
-  const changes = await ctx.db.events.withIndex("by_at", (range: any) => range.gte("at", dayStart).lte("at", dayEnd)).take(1000);
+  const changes = await countEvents(ctx, day);
   const num = (v: number) => (Number.isFinite(v) ? v.toFixed(4) : "");
   const f = tier(frontier);
   const m = tier(mid);
@@ -2066,11 +2226,15 @@ async function rollup(ctx: Ctx, day: string) {
     budgetIn: num(b.in), budgetOut: num(b.out), budgetN: String(b.n),
     cheapestFrontierIn: cheapestFrontier ? num(Number(cheapestFrontier.promptPrice) * 1_000_000) : "",
     cheapestFrontierId: cheapestFrontier ? String(cheapestFrontier.modelId) : "",
-    changes: String(changes.length),
+    changes: String(changes),
   };
   const existing = await ctx.db.daily.withIndex("by_date", (range: any) => range.eq("date", day)).first();
   if (existing) await ctx.db.daily.update(existing.id, row);
   else await ctx.db.daily.insert(row);
+  // The rollup runs part way through its day, so the day before is only complete now. Recount its changes.
+  const yesterday = new Date(Date.parse(`${day}T00:00:00.000Z`) - DAY).toISOString().slice(0, 10);
+  const prior = await ctx.db.daily.withIndex("by_date", (range: any) => range.eq("date", yesterday)).first();
+  if (prior) await ctx.db.daily.update(prior.id, { changes: String(await countEvents(ctx, yesterday)) });
 
   const byProvider = new Map<string, any[]>();
   for (const r of active) {
@@ -2101,13 +2265,52 @@ async function rollup(ctx: Ctx, day: string) {
 
 /** Recent stories across the archive, host events and lifecycle notices, filtered by query params. */
 async function filteredStories(ctx: Ctx, params: URLSearchParams, limit: number): Promise<Story[]> {
-  const events = (await ctx.db.events.withIndex("by_at").order("desc").take(300)) as ArchiveEvent[];
-  const hostEvents = (await ctx.db.hostEvents.withIndex("by_at").order("desc").take(100)) as HostEvent[];
-  const lifecycleEvents = (await ctx.db.lifecycleEvents.withIndex("by_at").order("desc").take(100)) as LifecycleEvent[];
-  const sourceEvents = await ctx.db.sourceEvents.withIndex("by_at").order("desc").take(200);
+  const watch = (params.get("watch") ?? "").split(",").map((t) => t.trim().toLowerCase()).filter(Boolean);
+  const provider = (params.get("provider") ?? "").toLowerCase();
+  const model = params.get("model") ?? "";
+  const kind = params.get("kind") ?? "";
   const active = await ctx.db.models.withIndex("by_active", (range: any) => range.eq("active", true)).take(1000);
+  const newest = (rows: any[], n: number) => rows.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0)).slice(0, n);
+
+  // A model or provider filter reads that model's or provider's own history through its index, so it reaches
+  // back past the newest events of everyone else. Watch and kind filters have no index and read a wider window.
+  let events: ArchiveEvent[];
+  let hostEvents: HostEvent[];
+  let lifecycleEvents: LifecycleEvent[];
+  let sourceEvents: any[];
+  if (model) {
+    const row = await ctx.db.models.withIndex("by_model", (range: any) => range.eq("modelId", model)).first();
+    const key = canonicalKey(String(row?.provider ?? model.split("/")[0]), model);
+    events = await ctx.db.events.withIndex("by_model", (range: any) => range.eq("modelId", model)).order("desc").take(300);
+    hostEvents = await ctx.db.hostEvents.withIndex("by_model", (range: any) => range.eq("modelId", model)).order("desc").take(200);
+    lifecycleEvents = await ctx.db.lifecycleEvents.withIndex("by_key", (range: any) => range.eq("key", key)).order("desc").take(100);
+    sourceEvents = await ctx.db.sourceEvents.withIndex("by_key", (range: any) => range.eq("key", key)).order("desc").take(200);
+  } else if (provider) {
+    const slugs = new Set([provider, `~${provider}`]);
+    for (const m of active) if (canonicalProvider(String(m.provider).replace(/^~/, "")) === canonicalProvider(provider)) slugs.add(String(m.provider));
+    const reads: ArchiveEvent[] = [];
+    for (const slug of slugs) reads.push(...(await ctx.db.events.withIndex("by_provider_at", (range: any) => range.eq("provider", slug)).order("desc").take(300)));
+    events = newest(reads, 300);
+    hostEvents = await ctx.db.hostEvents.withIndex("by_at").order("desc").take(1000);
+    lifecycleEvents = await ctx.db.lifecycleEvents.withIndex("by_at").order("desc").take(300);
+    sourceEvents = await ctx.db.sourceEvents.withIndex("by_at").order("desc").take(400);
+  } else {
+    const wide = watch.length > 0 || Boolean(kind);
+    events = await ctx.db.events.withIndex("by_at").order("desc").take(wide ? 1000 : 300);
+    hostEvents = await ctx.db.hostEvents.withIndex("by_at").order("desc").take(wide ? 400 : 100);
+    lifecycleEvents = await ctx.db.lifecycleEvents.withIndex("by_at").order("desc").take(wide ? 300 : 100);
+    sourceEvents = await ctx.db.sourceEvents.withIndex("by_at").order("desc").take(wide ? 400 : 200);
+  }
   const names = new Map<string, string>(active.map((m: any) => [String(m.modelId), String(m.name)]));
-  const keyToModel = new Map<string, string>(active.map((m: any) => [canonicalKey(String(m.provider), String(m.modelId)), String(m.modelId)]));
+  const keyToModel = new Map<string, string>();
+  for (const m of active) {
+    const id = String(m.modelId);
+    if (isAlias(id)) continue;
+    const key = canonicalKey(String(m.provider), id);
+    const held = keyToModel.get(key);
+    // A notice belongs on the plain listing, not on a ":batch" or ":free" variant of it.
+    if (!held || (held.includes(":") && !id.includes(":"))) keyToModel.set(key, id);
+  }
   const fromSources: ArchiveEvent[] = sourceEvents.map((r: any) => ({
     id: r.id, at: r.at, kind: r.kind, modelId: r.key, provider: r.provider, field: r.field, oldValue: r.oldValue, newValue: r.newValue, source: r.source,
   }));
@@ -2118,10 +2321,6 @@ async function filteredStories(ctx: Ctx, params: URLSearchParams, limit: number)
   for (const s of stories) if (s.source && s.source !== "hosts" && keyToModel.has(s.modelId)) s.modelId = keyToModel.get(s.modelId) as string;
   stories = sortStories(stories).filter((s) => s.kind !== "drift");
 
-  const watch = (params.get("watch") ?? "").split(",").map((t) => t.trim().toLowerCase()).filter(Boolean);
-  const provider = (params.get("provider") ?? "").toLowerCase();
-  const model = params.get("model") ?? "";
-  const kind = params.get("kind") ?? "";
   return stories
     .filter((s) => matchesWatch(s, watch))
     .filter((s) => !provider || canonicalProvider(s.provider) === canonicalProvider(provider))

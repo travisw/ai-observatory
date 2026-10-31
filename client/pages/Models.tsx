@@ -13,7 +13,7 @@ import { StarChart } from "../components/StarChart";
 import { Chip, Empty, PageHead, Section, Select, Skeleton, TextInput } from "../components/Wire";
 import { inputSpark } from "../lib/series";
 import { shortName } from "../lib/text";
-import { isLoading, longDate, modelHref, plural, usePageTitle, useSearchParams, useSince } from "../lib/util";
+import { isLoading, longDate, modelHref, plural, usePageTitle, useSearchParams } from "../lib/util";
 import { matchesWatchModel, useWatchlist } from "../lib/watch";
 
 type SortKey = "model" | "context" | "input" | "output" | "listed" | "score" | "changes";
@@ -50,8 +50,7 @@ export function ModelsPage() {
   const active = useQuery<ModelRow[]>("activeModels");
   const retired = useQuery<ModelRow[]>("retiredModels");
   const hosts = useQuery<HostsOverviewRow[]>("hostsOverview");
-  const since90 = useSince(90);
-  const events = useQuery<ArchiveEvent[]>("eventsSince", since90);
+  const events = useQuery<ArchiveEvent[]>("priceTrail", 90);
   const [watchlist] = useWatchlist();
 
   const set = (key: string, value: string) => {

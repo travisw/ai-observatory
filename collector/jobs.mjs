@@ -34,7 +34,11 @@ const GOOGLE_INCIDENTS = "https://status.cloud.google.com/incidents.json";
 const NPM_PACKAGES = ["@anthropic-ai/sdk", "openai", "@google/generative-ai", "langchain", "ollama"];
 const PYPI_PACKAGES = ["openai", "anthropic", "transformers", "langchain", "litellm", "vllm"];
 
-/** Anonymous GitHub allows 60 requests an hour, which is ample for a daily sweep. */
+/**
+ * Read through the ecosyste.ms mirror: GitHub refuses anonymous API calls from the worker's
+ * shared addresses. The mirror copies each repo every few days, so counts can trail GitHub.
+ */
+const ECOSYSTEMS_HEADERS = { accept: "application/json", "user-agent": "ai-observatory collector (+https://ai-observatory.view.fast)" };
 const REPOS = [
   "ollama/ollama",
   "vllm-project/vllm",
@@ -136,7 +140,7 @@ async function collectHosts(c) {
     await sleep(150);
     let body;
     try {
-      body = await withBackoff(() => getJson(`${OPENROUTER_MODELS}/${id}/endpoints`), { attempts: 3, baseMs: 2000 });
+      body = await withBackoff(() => getJson(`${OPENROUTER_MODELS}/${id}/endpoints`), { deadline: c.deadline });
     } catch (error) {
       // A model with no readable endpoint list is left alone rather than sent as empty,
       // which would retire every host it has.
@@ -383,11 +387,21 @@ async function collectStatus(c) {
   for (const source of STATUS_PAGES) {
     try {
       const body = await getJson(source.url);
+      // The summary lists only open incidents. The incident list adds the recent closed ones with their
+      // real end times, so an incident is recorded as resolved when it was, not when we noticed.
+      let recent = [];
+      try {
+        recent = (await getJson(source.url.replace("summary.json", "incidents.json")))?.incidents ?? [];
+      } catch (error) {
+        c.log(`status: ${source.provider} incident list unavailable (${error.message})`);
+      }
+      const byId = new Map();
+      for (const incident of [...recent, ...(body?.incidents ?? [])]) if (incident?.id) byId.set(incident.id, incident);
       providers.push({
         provider: source.provider,
         indicator: body?.status?.indicator ?? "unknown",
         description: body?.status?.description ?? "",
-        incidents: (body?.incidents ?? []).map(statuspageIncident),
+        incidents: [...byId.values()].map(statuspageIncident),
       });
     } catch (error) {
       // Record the outage of the status page itself rather than dropping the provider,
@@ -426,10 +440,14 @@ async function collectDaily(c) {
 
   const pypi = [];
   for (const pkg of PYPI_PACKAGES) {
-    // pypistats 429s on bursts. Backoff rather than a fixed sleep, since the limit
-    // window is longer than any polite pause and this is a once-a-day job with time.
+    // pypistats 429s on bursts, so it gets backoff, but never past the run's deadline: the day's
+    // snapshot is written in one go at the end and a run cut off at 30 seconds would lose all of it.
+    if (Date.now() > c.deadline) {
+      c.log(`daily: pypi ${pkg} skipped, out of time`);
+      continue;
+    }
     try {
-      const body = await withBackoff(() => getJson(`https://pypistats.org/api/packages/${pkg}/recent`));
+      const body = await withBackoff(() => getJson(`https://pypistats.org/api/packages/${pkg}/recent`), { deadline: c.deadline });
       pypi.push({
         pkg,
         lastDay: body?.data?.last_day ?? 0,
@@ -443,8 +461,14 @@ async function collectDaily(c) {
 
   const repos = [];
   for (const repo of REPOS) {
+    if (Date.now() > c.deadline) {
+      c.log(`daily: repo ${repo} skipped, out of time`);
+      continue;
+    }
     try {
-      const body = await getJson(`https://api.github.com/repos/${repo}`);
+      // The mirror sometimes answers 402 to the browser-like agent the status pages need, never to a plain one.
+      await sleep(300);
+      const body = await getJson(`https://repos.ecosyste.ms/api/v1/hosts/GitHub/repositories/${repo}`, ECOSYSTEMS_HEADERS);
       repos.push({
         repo,
         stars: body?.stargazers_count ?? 0,

@@ -12,8 +12,11 @@ export const HEADERS = {
 
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** A request that hangs is abandoned after this long, so one slow host cannot hold up a whole worker run. */
+export const FETCH_TIMEOUT_MS = 8_000;
+
 export async function getText(url, headers = {}) {
-  const res = await fetch(url, { headers: { ...HEADERS, ...headers } });
+  const res = await fetch(url, { headers: { ...HEADERS, ...headers }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   if (!res.ok) {
     const err = new Error(`${url} -> ${res.status}`);
     err.status = res.status;
@@ -30,15 +33,18 @@ export async function getJson(url, headers = {}) {
   return JSON.parse(text);
 }
 
-/** Retries on 429/5xx with exponential backoff; gives up after `attempts`. */
-export async function withBackoff(fn, { attempts = 5, baseMs = 4000 } = {}) {
+/**
+ * Retries on 429/5xx with exponential backoff; gives up after `attempts`, or rather than wait past
+ * `deadline` (a worker request is cut off at 30 seconds, so a retry it cannot finish is no use).
+ */
+export async function withBackoff(fn, { attempts = 3, baseMs = 2000, deadline = Infinity } = {}) {
   let delay = baseMs;
   for (let i = 1; ; i++) {
     try {
       return await fn();
     } catch (error) {
       const retryable = error.status === 429 || (error.status >= 500 && error.status < 600);
-      if (!retryable || i >= attempts) throw error;
+      if (!retryable || i >= attempts || Date.now() + delay > deadline) throw error;
       await sleep(delay);
       delay *= 2;
     }

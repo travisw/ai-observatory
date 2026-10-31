@@ -24,13 +24,15 @@ export function RetiringPage() {
   const keys = useMemo(() => keyIndex(models ?? []), [models]);
   if (isLoading(data)) return <Skeleton />;
 
-  // One line per model id: the provider's own page outranks the aggregator lists.
+  // One line per model, matched on the shared key so a provider's notice and a price list's entry for the same
+  // model are one line. The provider's own page outranks the aggregator lists.
   const rank: Record<string, number> = { openai: 0, anthropic: 0, cohere: 0, modelsdev: 1, litellm: 2 };
   const seen = new Map<string, LifecycleRow>();
   for (const row of data.lifecycle.slice().sort((a, b) => (rank[a.source] ?? 3) - (rank[b.source] ?? 3))) {
-    const id = `${row.provider}/${row.modelId}`;
+    const id = row.key || `${row.provider}/${row.modelId}`;
     if (!seen.has(id)) seen.set(id, row);
   }
+  const noticed = new Set([...seen.values()].filter((r) => r.retiresAt && r.state !== "retired" && r.retiresNote !== "not sooner than").map((r) => r.key));
   const rows: Retirement[] = [...seen.values()]
     .filter((r) => r.retiresAt && r.state !== "retired" && r.retiresNote !== "not sooner than")
     .map((r) => {
@@ -50,7 +52,7 @@ export function RetiringPage() {
       };
     });
   for (const m of data.expiring) {
-    if (isAlias(m.modelId)) continue;
+    if (isAlias(m.modelId) || noticed.has(canonicalKey(m.provider, m.modelId))) continue;
     rows.push({
       key: m.id,
       model: shortName(m.modelId, m.name),
@@ -84,7 +86,13 @@ export function RetiringPage() {
 
       {next ? (
         <div class="stats">
-          <Stat value={plural(daysUntil(next.retiresAt), "day")} label={next.source === "openrouter" ? `until ${next.model} leaves the OpenRouter catalogue on ${longDate(next.retiresAt)}` : `until ${providerName(next.provider)} retires ${next.model} on ${longDate(next.retiresAt)}`} href={next.href ?? undefined} tone={daysUntil(next.retiresAt) <= 30 ? "rise" : ""} />
+          <Stat
+            value={daysUntil(next.retiresAt) === 0 ? "today" : plural(daysUntil(next.retiresAt), "day")}
+            label={
+              daysUntil(next.retiresAt) === 0
+                ? next.source === "openrouter" ? `${next.model} leaves the OpenRouter catalogue` : `${providerName(next.provider)} retires ${next.model}`
+                : next.source === "openrouter" ? `until ${next.model} leaves the OpenRouter catalogue on ${longDate(next.retiresAt)}` : `until ${providerName(next.provider)} retires ${next.model} on ${longDate(next.retiresAt)}`
+            } href={next.href ?? undefined} tone={daysUntil(next.retiresAt) <= 30 ? "rise" : ""} />
           <Stat value={String(withinMonth)} label="retiring within 30 days" />
           <Stat value={String(rows.length)} label="notices with a date" />
         </div>

@@ -98,13 +98,15 @@ const CSS = `
 .wire .rec .l{font-size:12px;color:var(--soft);margin-top:6px}
 .wire .rec a{color:var(--fg)}
 .wire .stats{display:flex;flex-wrap:wrap;gap:14px 32px;padding:14px 0}
+.wire .stat{min-width:0;max-width:100%}
 .wire .stat .v{font-family:${FONT_MONO};font-size:24px;line-height:1;font-variant-numeric:tabular-nums}
 .wire .stat .l{font-size:12px;color:var(--soft);margin-top:5px}
 .wire .foot{font-size:12px;color:var(--soft);border-top:1px solid var(--rule);padding:12px 0 32px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:24px}
 .wire .foot a:hover,.wire .foot button:hover{color:var(--fg)}
 .wire .foot button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
-.wire .days{display:inline-flex;gap:2px;vertical-align:middle}
-.wire .days i{display:block;width:5px;height:12px;border-radius:1px;background:var(--rule)}
+.wire .days{display:inline-flex;gap:2px;vertical-align:middle;max-width:100%}
+.wire .days i{display:block;flex:0 1 5px;min-width:1px;height:12px;border-radius:1px;background:var(--rule)}
+@media (max-width:640px){.wire .days{gap:1px}}
 .wire .days i.up{background:var(--cut)}.wire .days i.degraded{background:var(--warn)}.wire .days i.down{background:var(--rise)}
 .wire .sk{background:var(--bg2);border-radius:2px}
 .wire .note{font-size:12.5px;color:var(--soft);line-height:1.5;max-width:66ch}
@@ -343,7 +345,8 @@ export function LineChart(props: { title: string; hint?: string; series: LineSer
         {props.series.map((s) => (
           <path
             key={s.label}
-            d={s.values.map((v, i) => `${i ? "L" : "M"}${toX(i).toFixed(1)} ${toY(v).toFixed(1)}`).join(" ")}
+            // A day with no figure (NaN) leaves a gap; the line picks up again at the next figure.
+            d={s.values.map((v, i) => (Number.isFinite(v) ? `${i && Number.isFinite(s.values[i - 1]) ? "L" : "M"}${toX(i).toFixed(1)} ${toY(v).toFixed(1)}` : "")).filter(Boolean).join(" ")}
             fill="none"
             stroke={s.color}
             stroke-width="1.6"
@@ -351,9 +354,10 @@ export function LineChart(props: { title: string; hint?: string; series: LineSer
         ))}
       </svg>
       <div class="leg">
-        {props.series.map((s) => (
-          <span key={s.label}><i style={{ background: s.color }} />{s.label} {s.values.length ? props.format(s.values[s.values.length - 1]) : ""}</span>
-        ))}
+        {props.series.map((s) => {
+          const last = s.values[s.values.length - 1];
+          return <span key={s.label}><i style={{ background: s.color }} />{s.label} {s.values.length ? (Number.isFinite(last) ? props.format(last) : "–") : ""}</span>;
+        })}
       </div>
     </div>
   );

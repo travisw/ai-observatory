@@ -12,7 +12,7 @@ import { nameIndex } from "../lib/stories";
 import { dayYear, shortName } from "../lib/text";
 import { isLoading, modelHref, plural, usePageTitle } from "../lib/util";
 
-type Shape = { title: string; value: (r: RecordRow) => string };
+type Shape = { title: string | ((r: RecordRow) => string); value: (r: RecordRow) => string };
 
 const SHAPES: Record<string, Shape> = {
   "biggest-cut-input": { title: "largest input price cut", value: (r) => `−${Math.abs(Number(r.value)).toFixed(0)}%` },
@@ -20,8 +20,8 @@ const SHAPES: Record<string, Shape> = {
   "biggest-cut-output": { title: "largest output price cut", value: (r) => `−${Math.abs(Number(r.value)).toFixed(0)}%` },
   "biggest-raise-output": { title: "largest output price rise", value: (r) => `+${Math.abs(Number(r.value)).toFixed(0)}%` },
   "most-repriced": { title: "most price changes", value: (r) => Number(r.value).toLocaleString() },
-  "shortest-lived": { title: "days listed, the shortest ever", value: (r) => Number(r.value).toLocaleString() },
-  "largest-context-jump": { title: "largest context increase, tokens", value: (r) => formatContext(r.value) },
+  "shortest-lived": { title: (r) => `${Number(r.value) === 1 ? "day" : "days"} listed, the shortest ever`, value: (r) => Number(r.value).toLocaleString() },
+  "largest-context-jump": { title: "largest context increase, tokens", value: (r) => `+${formatContext(r.value)}` },
   "cheapest-listed-ever": { title: "cheapest paid model ever, per million input", value: (r) => money(r.value) },
   "longest-unchanged": { title: "days without a price change", value: (r) => Number(r.value).toLocaleString() },
 };
@@ -33,7 +33,8 @@ export function RecordsPage() {
   const records = useQuery<RecordRow[]>("records");
   const models = useQuery<ModelRow[]>("activeModels");
   const names = useMemo(() => nameIndex(models ?? []), [models]);
-  if (isLoading(records) && isLoading(models)) return <Skeleton />;
+  // The records decide what shows; the model names only improve labels, and the palette may already hold them.
+  if (records === undefined || records === null) return <Skeleton />;
   const byKey = new Map((records ?? []).map((r) => [r.key, r]));
   const rows = ORDER.map((k) => byKey.get(k)).filter((r): r is RecordRow => Boolean(r));
 
@@ -50,7 +51,7 @@ export function RecordsPage() {
             const shape = SHAPES[r.key];
             return (
               <div key={r.id}>
-                <Rec value={shape.value(r)} label={shape.title} holder={shortName(r.modelId, names.get(r.modelId))} href={modelHref(r.modelId)} />
+                <Rec value={shape.value(r)} label={typeof shape.title === "function" ? shape.title(r) : shape.title} holder={shortName(r.modelId, names.get(r.modelId))} href={modelHref(r.modelId)} />
                 <div class="soft small" style={{ marginTop: 4 }}>
                   {providerName(r.provider)} · {r.detail}{r.at && r.key !== "longest-unchanged" ? ` · ${dayYear(r.at)}` : ""}
                 </div>

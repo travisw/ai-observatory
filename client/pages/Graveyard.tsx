@@ -10,7 +10,7 @@ import type { GraveyardData, ModelRow, RetiringData } from "../../shared/types";
 import { Chip, DayRow, Empty, PageHead, Section, Skeleton, Stat } from "../components/Wire";
 import { keyIndex } from "../lib/stories";
 import { dayShort, shortName } from "../lib/text";
-import { DAY, daysUntil, isLoading, longDate, modelHref, monthLabel, plural, providerHref, usePageTitle } from "../lib/util";
+import { DAY, countdown, daysUntil, isLoading, longDate, modelHref, monthLabel, plural, providerHref, usePageTitle } from "../lib/util";
 
 function lifespan(from: string, to: string): string {
   const days = Math.max(0, Math.round((Date.parse(to) - Date.parse(from)) / DAY));
@@ -26,14 +26,24 @@ export function GraveyardPage() {
   const retiring = useQuery<RetiringData>("retiring");
   const active = useQuery<ModelRow[]>("activeModels");
   const keys = useMemo(() => keyIndex(active ?? []), [active]);
-  if (isLoading(data)) return <Skeleton />;
+  // The listed models are needed to keep a model that is still in the catalogue out of the graveyard.
+  if (isLoading(data) || isLoading(active)) return <Skeleton />;
 
   const retired = data.retired.filter((m) => !isAlias(m.modelId));
   const byKey = new Map(data.lifecycle.map((l) => [l.key, l]));
   const next = isLoading(retiring) ? null : retiring.lifecycle.filter((l) => l.state === "deprecated" && l.retiresAt && l.retiresNote !== "not sooner than" && daysUntil(l.retiresAt) >= 0).sort((a, b) => a.retiresAt.localeCompare(b.retiresAt))[0] ?? null;
   const lifespans = retired.map((m) => (Date.parse(m.lastSeenAt) - Date.parse(m.firstSeenAt)) / DAY).filter((d) => d > 0).sort((a, b) => a - b);
   const medianLife = lifespans.length ? lifespans[Math.floor(lifespans.length / 2)] : null;
-  const official = data.lifecycle.filter((l) => !retired.some((m) => canonicalKey(m.provider, m.modelId) === l.key));
+  // Notices for models never in the catalogue: one line per model (a provider's own page outranks the price
+  // lists), and none for a model that is listed now or already buried above.
+  const rank: Record<string, number> = { openai: 0, anthropic: 0, cohere: 0, modelsdev: 1, litellm: 2 };
+  const buried = new Set(retired.map((m) => canonicalKey(m.provider, m.modelId)));
+  const officialByKey = new Map<string, (typeof data.lifecycle)[number]>();
+  for (const l of data.lifecycle.slice().sort((a, b) => (rank[a.source] ?? 3) - (rank[b.source] ?? 3))) {
+    if (buried.has(l.key) || keys.has(l.key) || officialByKey.has(l.key)) continue;
+    officialByKey.set(l.key, l);
+  }
+  const official = [...officialByKey.values()];
   const byMonth = new Map<string, typeof retired>();
   for (const m of retired) {
     const key = m.lastSeenAt.slice(0, 7);
@@ -52,7 +62,7 @@ export function GraveyardPage() {
         <Stat value={String(retired.length)} label="removed from the catalogue" tone="rise" />
         <Stat value={medianLife ? `${Math.round(medianLife)} days` : "—"} label="typical time listed" />
         {next ? (
-          <Stat value={shortName(next.modelId)} label={`next to retire · in ${daysUntil(next.retiresAt)} days`} href="/retiring" tone={daysUntil(next.retiresAt) <= 30 ? "rise" : ""} />
+          <Stat value={shortName(next.modelId)} label={`next to retire · ${countdown(next.retiresAt)}`} href="/retiring" tone={daysUntil(next.retiresAt) <= 30 ? "rise" : ""} />
         ) : (
           <Stat value="none announced" label="next to retire" tone="soft" />
         )}
@@ -96,7 +106,7 @@ export function GraveyardPage() {
       )}
 
       {official.length ? (
-        <Section title="Retired by notice" hint="on the providers' own pages, never listed here">
+        <Section title="Retired by notice" hint="from the providers' notices and the open price lists; never in the catalogue here">
           <div class="tw">
             <table aria-label="Retired by notice">
               <thead><tr><th>Provider</th><th>Model</th><th class="n">Retired</th></tr></thead>

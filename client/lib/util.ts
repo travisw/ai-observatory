@@ -41,7 +41,9 @@ export function ago(iso: string | undefined | null): string {
 
 /** Days from now until an ISO date, negative when past. */
 export function daysUntil(iso: string): number {
-  return Math.ceil((Date.parse(iso) - Date.now()) / DAY);
+  // Counted in UTC calendar days, so a date is 0 for the whole of that day rather than -0 once it has begun.
+  const today = Date.parse(new Date().toISOString().slice(0, 10));
+  return Math.round((Date.parse(iso.slice(0, 10)) - today) / DAY);
 }
 
 /** "in 41 days", "tomorrow", "12 days ago". */

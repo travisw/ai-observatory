@@ -39,7 +39,7 @@ const PRIMARY = [
   { to: "/retiring", label: "Retirements", match: (p: string) => p === "/retiring" || p === "/graveyard" },
   { to: "/status", label: "Status", match: (p: string) => p === "/status" },
   { to: "/benchmarks", label: "Benchmarks", match: (p: string) => p === "/benchmarks" },
-  { to: "/index", label: "Index", match: (p: string) => p === "/index" },
+  { to: "/price-index", label: "Index", match: (p: string) => p === "/price-index" || p === "/index" },
 ];
 
 const MORE = [
@@ -183,6 +183,8 @@ function Shell() {
             <Route path="/graveyard" element={<GraveyardPage />} />
             <Route path="/records" element={<RecordsPage />} />
             <Route path="/benchmarks" element={<BenchmarksPage />} />
+            {/* The host answers a direct request for /index with the home page, so the page lives at /price-index. */}
+            <Route path="/price-index" element={<PriceIndexPage />} />
             <Route path="/index" element={<PriceIndexPage />} />
             <Route path="/time-machine" element={<TimeMachinePage />} />
             <Route path="/pulse" element={<PulsePage />} />

@@ -6,11 +6,14 @@ import { useNavigate, useQuery } from "@spacefast/zero/client";
 
 import { providerName } from "../../shared/providers";
 import type { Story } from "../../shared/stories";
-import type { ArchiveEvent, HostEvent, LifecycleEvent, ModelRow, Page, SourceEventRow } from "../../shared/types";
+import type { ChangesData, ModelRow } from "../../shared/types";
 import { Chip, DayRow, Empty, PageHead, Section, Select, Skeleton, StoryRow, StoryTable } from "../components/Wire";
 import { KIND_GROUPS, assembleStories, keyIndex, kindInGroup, nameIndex, storyHref } from "../lib/stories";
 import { dayLabel, plural, usePageTitle, useSearchParams } from "../lib/util";
 import { matchesWatch, useWatchlist } from "../lib/watch";
+
+/** The most the page loads: ten steps of 150 archive events. */
+const MAX_PAGES = 10;
 
 function withParam(params: URLSearchParams, key: string, value: string): string {
   const next = new URLSearchParams(params);
@@ -21,24 +24,6 @@ function withParam(params: URLSearchParams, key: string, value: string): string 
   return `/changes${s ? `?${s}` : ""}`;
 }
 
-/** Each loaded page is its own live subscription keyed by cursor; page N needs page N-1's cursor. */
-function usePages(provider: string, pages: number): { events: ArchiveEvent[]; last: Page<ArchiveEvent> | null; loaded: number } {
-  const cursors: (string | null)[] = [null];
-  const results: Page<ArchiveEvent>[] = [];
-  for (let i = 0; i < pages; i++) {
-    const cursor = cursors[i];
-    if (cursor === undefined) break;
-    // Hooks run in a stable order because `pages` only changes with the URL.
-    const result = provider ? useQuery<Page<ArchiveEvent>>("eventsByProvider", provider, cursor) : useQuery<Page<ArchiveEvent>>("eventsPage", cursor);
-    const page = Array.isArray(result) ? null : result;
-    if (!page) break;
-    results.push(page);
-    if (page.isDone || !page.continueCursor) break;
-    cursors.push(page.continueCursor);
-  }
-  return { events: results.flatMap((p) => p.page), last: results[results.length - 1] ?? null, loaded: results.length };
-}
-
 export function ChangesPage() {
   usePageTitle("Changes");
   const params = useSearchParams();
@@ -47,13 +32,10 @@ export function ChangesPage() {
   const provider = params.get("provider") ?? "";
   const confirmedOnly = params.get("confirmed") === "1";
   const watchOnly = params.get("watch") === "1";
-  const pages = Math.max(1, Math.min(20, Number(params.get("page") ?? "1") || 1));
+  const pages = Math.max(1, Math.min(MAX_PAGES, Number(params.get("page") ?? "1") || 1));
 
   const models = useQuery<ModelRow[]>("activeModels");
-  const { events, last, loaded } = usePages(provider, pages);
-  const hostEvents = useQuery<HostEvent[]>("recentHostEvents");
-  const lifecycleEvents = useQuery<LifecycleEvent[]>("recentLifecycleEvents");
-  const sourceEvents = useQuery<SourceEventRow[]>("recentSourceEvents");
+  const data = useQuery<ChangesData>("changesPage", provider, pages);
   const [watchlist] = useWatchlist();
 
   const all = models ?? [];
@@ -61,13 +43,14 @@ export function ChangesPage() {
   const keys = useMemo(() => keyIndex(all), [all]);
   const providers = useMemo(() => [...new Set((models ?? []).map((m) => m.provider.replace(/^~/, "")))].sort((a, b) => providerName(a).localeCompare(providerName(b))), [models]);
 
-  const oldest = events.length ? events[events.length - 1].at : "";
+  const loading = data === undefined || data === null;
   const stories = useMemo(() => {
+    if (!data) return [];
     const pile = assembleStories({
-      events,
-      sourceEvents: (sourceEvents ?? []).filter((e) => !oldest || e.at >= oldest),
-      hostEvents: (hostEvents ?? []).filter((e) => !oldest || e.at >= oldest),
-      lifecycleEvents: (lifecycleEvents ?? []).filter((e) => !oldest || e.at >= oldest),
+      events: data.events,
+      sourceEvents: data.sourceEvents,
+      hostEvents: data.hostEvents,
+      lifecycleEvents: data.lifecycleEvents,
       names,
     });
     return pile.filter((s) => {
@@ -77,7 +60,7 @@ export function ChangesPage() {
       if (watchOnly && !matchesWatch(s, watchlist)) return false;
       return true;
     });
-  }, [events, sourceEvents, hostEvents, lifecycleEvents, names, kind, provider, confirmedOnly, watchOnly, watchlist, oldest]);
+  }, [data, names, kind, provider, confirmedOnly, watchOnly, watchlist]);
 
   const byDay = new Map<string, Story[]>();
   for (const s of stories) {
@@ -86,7 +69,7 @@ export function ChangesPage() {
     if (list) list.push(s);
     else byDay.set(key, [s]);
   }
-  const loading = events.length === 0 && loaded === 0;
+  const more = Boolean(data?.more);
 
   return (
     <div class="stack">
@@ -114,7 +97,7 @@ export function ChangesPage() {
         {loading ? (
           <Skeleton rows={8} />
         ) : stories.length === 0 ? (
-          <Empty>{last && !last.isDone ? "Nothing matches in what is loaded. Load older, or loosen the filters." : "Nothing matches. Loosen the filters."}</Empty>
+          <Empty>{more ? "Nothing matches in what is loaded. Load older, or loosen the filters." : "Nothing matches. Loosen the filters."}</Empty>
         ) : (
           <StoryTable label="Changes">
             {[...byDay.entries()].map(([day, list]) => (
@@ -126,11 +109,13 @@ export function ChangesPage() {
           </StoryTable>
         )}
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 12, paddingTop: 12 }}>
-          <span class="small soft">{oldest ? `Loaded back to ${dayLabel(oldest)}.` : ""}</span>
+          <span class="small soft">{loading ? "" : data.from ? `Loaded back to ${dayLabel(data.from).toLowerCase()}.` : "Loaded back to the start of the record."}</span>
           <span class="chips">
             {pages > 1 ? <Chip to={withParam(params, "page", String(pages - 1))}>Fewer</Chip> : null}
-            {last && !last.isDone ? (
+            {loading ? null : more && pages < MAX_PAGES ? (
               <Chip onClick={() => navigate(withParam(params, "page", String(pages + 1)))} active>Load older</Chip>
+            ) : more ? (
+              <span class="small soft">That is as far back as this page loads; each model's page keeps its full history</span>
             ) : (
               <span class="small soft">That is the whole record</span>
             )}

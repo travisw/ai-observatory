@@ -21,7 +21,7 @@ const PAGES: { path: string; label: string }[] = [
   { path: "/retiring", label: "Retirements" },
   { path: "/status", label: "Status" },
   { path: "/benchmarks", label: "Benchmarks" },
-  { path: "/index", label: "Price index" },
+  { path: "/price-index", label: "Price index" },
   { path: "/compare", label: "Compare" },
   { path: "/records", label: "Records" },
   { path: "/graveyard", label: "Graveyard" },

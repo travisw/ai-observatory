@@ -7,17 +7,16 @@ import { Link, useQuery } from "@spacefast/zero/client";
 
 import { providerName } from "../../shared/providers";
 import { canonicalProvider } from "../../shared/sources";
-import type { ArchiveEvent, ModelRow, StatusPageData } from "../../shared/types";
+import type { ModelRow, StatusPageData } from "../../shared/types";
 import { Chip, Empty, PageHead, Pill, Skeleton } from "../components/Wire";
 import { statusRemark, statusWord } from "../lib/text";
-import { isLoading, plural, providerHref, usePageTitle, useSince } from "../lib/util";
+import { isLoading, plural, providerHref, usePageTitle } from "../lib/util";
 
 export function ProvidersPage() {
   usePageTitle("Providers");
   const models = useQuery<ModelRow[]>("activeModels");
   const status = useQuery<StatusPageData>("statusPage");
-  const since7 = useSince(7);
-  const events = useQuery<ArchiveEvent[]>("eventsSince", since7);
+  const changeCounts = useQuery<Record<string, number>>("providerChanges", 7);
 
   const rows = useMemo(() => {
     const counts = new Map<string, { listed: number; aliases: number }>();
@@ -28,18 +27,14 @@ export function ProvidersPage() {
       else c.listed++;
       counts.set(slug, c);
     }
-    const changes = new Map<string, number>();
-    for (const e of events ?? []) {
-      const slug = e.provider.replace(/^~/, "");
-      changes.set(slug, (changes.get(slug) ?? 0) + 1);
-    }
     const statuses = new Map((isLoading(status) ? [] : status.statuses).map((s) => [canonicalProvider(s.provider), s]));
     return [...counts.entries()]
-      .map(([slug, c]) => ({ slug, ...c, changes: changes.get(slug) ?? 0, status: statuses.get(canonicalProvider(slug)) ?? null }))
+      .map(([slug, c]) => ({ slug, ...c, changes: changeCounts?.[slug] ?? 0, status: statuses.get(canonicalProvider(slug)) ?? null }))
       .sort((a, b) => b.listed - a.listed || providerName(a.slug).localeCompare(providerName(b.slug)));
-  }, [models, events, status]);
+  }, [models, changeCounts, status]);
 
-  if (isLoading(models)) return <Skeleton />;
+  // Every column waits for its data, so a table never shows "no status page" or "—" for something still loading.
+  if (isLoading(models) || isLoading(status) || changeCounts === undefined || changeCounts === null) return <Skeleton />;
 
   return (
     <div class="stack">

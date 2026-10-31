@@ -139,7 +139,11 @@ export function ModelPage() {
   const rangeDays = RANGES.find((r) => r.key === range)?.days ?? 0;
   const from = rangeDays ? Math.max(earliest, Date.now() - rangeDays * DAY) : earliest;
   const lowInput = model.lowInput ? Number(model.lowInput) * 1e6 : null;
-  const contextSeries = events.some((e) => e.field === "contextLength") ? stepSeries(events, "contextLength", String(Number(model.contextLength) / 1e6), model.firstSeenAt) : [];
+  // stepSeries reads values as per-token prices and multiplies by a million; scaling token counts down by 1e12
+  // first makes its points millions of tokens, the unit this chart is labelled in.
+  const toMillions = (v: string) => String(Number(v) / 1e12);
+  const contextEvents = events.filter((e) => e.field === "contextLength").map((e) => ({ ...e, oldValue: toMillions(e.oldValue), newValue: toMillions(e.newValue) }));
+  const contextSeries = contextEvents.length ? stepSeries(contextEvents, "contextLength", toMillions(model.contextLength), model.firstSeenAt) : [];
 
   const inputSinceListed = pctChange(firstValue(events, "promptPrice", model.promptPrice), model.promptPrice);
   const outputSinceListed = pctChange(firstValue(events, "completionPrice", model.completionPrice), model.completionPrice);

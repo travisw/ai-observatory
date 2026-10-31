@@ -487,10 +487,26 @@ export function hostStories(events: HostEvent[], names: Map<string, string>): St
     if (list) list.push(e);
     else groups.set(key, [e]);
   }
-  const out: Story[] = [];
+  // A host often serves one model from several endpoints (regions, precisions) that change together. Identical changes fold
+  // into one story; endpoints of the same host that changed differently keep a story each, named by endpoint.
+  const folded = new Set<string>();
+  const perHost = new Map<string, number>();
+  const kept: [string, HostEvent[]][] = [];
   for (const [key, group] of groups) {
     const first = group[0];
+    const changes = group.map((e) => `${e.kind}|${e.field}|${e.oldValue}|${e.newValue}`).sort().join(";");
+    const fold = `${first.modelId}|${first.host}|${first.at}|${changes}`;
+    if (folded.has(fold)) continue;
+    folded.add(fold);
+    const hostKey = `${first.modelId}|${first.host}|${first.at}`;
+    perHost.set(hostKey, (perHost.get(hostKey) ?? 0) + 1);
+    kept.push([key, group]);
+  }
+  const out: Story[] = [];
+  for (const [key, group] of kept) {
+    const first = group[0];
     const model = modelName(first.modelId, names.get(first.modelId));
+    const host = (perHost.get(`${first.modelId}|${first.host}|${first.at}`) ?? 1) > 1 ? `${first.host} (${first.tag.split("/").pop()})` : first.host;
     const asArchive: ArchiveEvent[] = group.map((e) => ({
       id: e.id, at: e.at, kind: e.kind, modelId: e.modelId, provider: first.host, field: e.field,
       oldValue: e.oldValue, newValue: e.newValue, source: "hosts",
@@ -499,9 +515,9 @@ export function hostStories(events: HostEvent[], names: Map<string, string>): St
     const lifecycle = group.find((e) => e.kind !== "changed");
     if (lifecycle) {
       if (lifecycle.kind === "removed") {
-        out.push({ ...base, kind: "unhosted", score: 32, headline: `${first.host} stopped serving ${model}`, detail: "" });
+        out.push({ ...base, kind: "unhosted", score: 32, headline: `${host} stopped serving ${model}`, detail: "" });
       } else {
-        out.push({ ...base, kind: "hosted", score: 24, headline: `${model} is now served by ${first.host}`, detail: lifecycle.kind === "returned" ? "back after a gap" : "" });
+        out.push({ ...base, kind: "hosted", score: 24, headline: `${model} is now served by ${host}`, detail: lifecycle.kind === "returned" ? "back after a gap" : "" });
       }
       continue;
     }
@@ -521,20 +537,20 @@ export function hostStories(events: HostEvent[], names: Map<string, string>): St
       const leadMove = pct(lead.oldValue, lead.newValue);
       const detail = prices.map((e) => `${PRICE_LABEL[e.field]} ${money(e.oldValue)} → ${money(e.newValue)}`).join(" · ");
       if (biggest < DRIFT_THRESHOLD_PCT) {
-        out.push({ ...base, kind: "drift", score: 4, headline: `${first.host} moved ${model} price ${fmtPct(leadMove)}`, detail, more });
+        out.push({ ...base, kind: "drift", score: 4, headline: `${host} moved ${model} price ${fmtPct(leadMove)}`, detail, more });
       } else {
         const allDown = moves.every((m) => m <= 0);
         const allUp = moves.every((m) => m >= 0);
         const verb = allDown ? "cut" : allUp ? "raised" : "repriced";
         out.push({
           ...base, kind: "repriced", score: 20 + Math.min(25, biggest / 2),
-          headline: `${first.host} ${verb} ${model} ${prices.length > 1 ? "prices" : `${PRICE_LABEL[lead.field]} price`}${verb === "repriced" ? "" : ` ${fmtPct(Math.abs(leadMove))}`}`,
+          headline: `${host} ${verb} ${model} ${prices.length > 1 ? "prices" : `${PRICE_LABEL[lead.field]} price`}${verb === "repriced" ? "" : ` ${fmtPct(Math.abs(leadMove))}`}`,
           detail, more,
         });
       }
       continue;
     }
-    out.push({ ...base, kind: "other", score: 8, headline: `${first.host} changed how it serves ${model}`, detail: more.join(" · "), more: [] });
+    out.push({ ...base, kind: "other", score: 8, headline: `${host} changed how it serves ${model}`, detail: more.join(" · "), more: [] });
   }
   return sortStories(out);
 }
@@ -645,8 +661,10 @@ export function foldDrift(stories: Story[]): Story[] {
     const oldest = lead[lead.length - 1];
     const newest = lead[0];
     const net = oldest && newest ? pct(oldest.oldValue, newest.newValue) : 0;
-    const model = s.headline.replace(/ price (moved|drifted).*$/, "");
-    s.headline = `${model} price moved ${s.folded} times, net ${signedPct(net)}`;
+    // A host headline reads "Host moved Model price +1.2%"; a model's own reads "Model price moved +1.2%".
+    s.headline = s.source === "hosts"
+      ? `${s.headline.replace(/ price \S+$/, "")} price ${s.folded} times, net ${signedPct(net)}`
+      : `${s.headline.replace(/ price (moved|drifted).*$/, "")} price moved ${s.folded} times, net ${signedPct(net)}`;
     s.detail = oldest && newest ? `input ${money(oldest.oldValue)} → ${money(newest.newValue)} over the day` : s.detail;
   }
   return out;

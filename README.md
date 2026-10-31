@@ -20,7 +20,7 @@ the capsule's mutations.
 | Deprecation and retirement notices | OpenAI, Anthropic and Cohere deprecation pages; LiteLLM and models.dev flags | 6 h |
 | Provider status and incidents | Statuspage JSON for OpenAI, Anthropic, Groq, Cohere, Cerebras, Fireworks, Perplexity, Replicate; Google Cloud incidents | 1 h |
 | Market summary (median prices, frontier / mid / budget baskets) | computed from the archive | daily |
-| Open-weights attention, SDK downloads, repo stars | Hugging Face, npm, PyPI, GitHub | daily |
+| Open-weights attention, SDK downloads, repo stars | Hugging Face, npm, PyPI, ecosyste.ms (a mirror of GitHub, CC BY-SA 4.0) | daily |
 | Published benchmark results (GPQA Diamond, SWE-bench Verified, FrontierMath, ARC-AGI-2, Humanity's Last Exam, and more) | Epoch AI's benchmarking hub (one zip of CSVs, CC BY 4.0); the LMArena text leaderboard (Hugging Face dataset, CC BY 4.0) | daily |
 
 Every source is public and keyless. Nothing is ever deleted: a model that leaves the catalogue

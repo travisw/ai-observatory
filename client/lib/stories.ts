@@ -45,7 +45,15 @@ export function nameIndex(models: Pick<ModelRow, "modelId" | "name">[] | undefin
 
 /** Canonical key → tracked model id, so a story from another source can link to the model page. */
 export function keyIndex(models: Pick<ModelRow, "modelId" | "provider">[] | undefined): Map<string, string> {
-  return new Map((models ?? []).map((m) => [canonicalKey(m.provider, m.modelId), m.modelId]));
+  const index = new Map<string, string>();
+  for (const m of models ?? []) {
+    if (m.modelId.startsWith("~")) continue;
+    const key = canonicalKey(m.provider, m.modelId);
+    const held = index.get(key);
+    // A notice links to the plain listing, not to a ":batch" or ":free" variant of it.
+    if (!held || (held.includes(":") && !m.modelId.includes(":"))) index.set(key, m.modelId);
+  }
+  return index;
 }
 
 /** Where a story links: its model page when we track that model, nowhere otherwise. */

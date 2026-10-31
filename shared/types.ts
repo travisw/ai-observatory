@@ -236,6 +236,8 @@ export type TrendRow = { id: string; at: string; rank: string; modelId: string; 
 export type PkgRow = { id: string; at: string; pkg: string; downloads: string };
 export type PypiRow = { id: string; at: string; pkg: string; lastDay: string; lastWeek: string; lastMonth: string };
 export type RepoRow = { id: string; at: string; repo: string; stars: string; forks: string; openIssues: string };
+export type ChangesData = { events: ArchiveEvent[]; hostEvents: HostEvent[]; lifecycleEvents: LifecycleEvent[]; sourceEvents: SourceEventRow[]; from: string; more: boolean };
+export type PulseData ={ trending: TrendRow[]; packages: PkgRow[]; pypi: PypiRow[]; repos: RepoRow[]; polls: PollRow[] };
 
 export type Page<T> = { page: T[]; continueCursor: string | null; isDone: boolean };
 

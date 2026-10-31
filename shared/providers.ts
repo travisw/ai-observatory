@@ -29,7 +29,8 @@ const NAMES: Record<string, string> = {
   "mancer": "Mancer",
   "meituan": "Meituan",
   "meta": "Meta",
-  "meta-llama": "Meta",
+  // OpenRouter files the Llama models under their own organisation, beside "meta"; one name for both listed Meta twice.
+  "meta-llama": "Meta Llama",
   "microsoft": "Microsoft",
   "minimax": "MiniMax",
   "mistral": "Mistral",

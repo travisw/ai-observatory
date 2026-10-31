@@ -7,19 +7,17 @@ import { Link, useParams, useQuery } from "@spacefast/zero/client";
 
 import { formatContext, money } from "../../shared/model";
 import { isAlias, providerName } from "../../shared/providers";
-import type { ArchiveEvent, ProviderPageData } from "../../shared/types";
+import type { ProviderPageData } from "../../shared/types";
 import { StepChart, type StepSeries } from "../components/StepChart";
 import { Chip, DayRow, Empty, PageHead, Pill, Section, Skeleton, Stat, StoryRow, StoryTable, UptimeStrip } from "../components/Wire";
 import { uptimeDays, uptimeSummary } from "../lib/series";
 import { assembleStories, keyIndex, nameIndex, storyHref } from "../lib/stories";
 import { dayShort, daysLeft, hm, pct, shortName, statusRemark, statusWord } from "../lib/text";
-import { DAY, ago, dayLabel, isLoading, longDate, modelHref, plural, usePageTitle, useSince } from "../lib/util";
+import { DAY, ago, dayLabel, isLoading, longDate, modelHref, plural, usePageTitle } from "../lib/util";
 
 export function ProviderPage() {
   const { slug = "" } = useParams() as { slug?: string };
   const data = useQuery<ProviderPageData>("providerPage", slug);
-  const since90 = useSince(90);
-  const recent = useQuery<ArchiveEvent[]>("eventsSince", since90);
   const name = providerName(slug);
   usePageTitle(name);
 
@@ -28,10 +26,10 @@ export function ProviderPage() {
   const names = useMemo(() => nameIndex(models), [models]);
   const keys = useMemo(() => keyIndex(models), [models]);
   const stories = useMemo(() => (loading ? [] : assembleStories({ events: data.events, names })), [loading, data, names]);
-  const ownRecent = (recent ?? []).filter((e) => e.provider.replace(/^~/, "") === slug);
 
   if (loading) return <Skeleton />;
-  if (models.length === 0) {
+  // A provider with a status page but nothing listed on OpenRouter (Groq, Cerebras) still has a page for its status.
+  if (models.length === 0 && !data.status) {
     return (
       <div class="stack">
         <PageHead title="Unknown provider">No models from "{slug}" have been seen. <Link to="/providers">All providers</Link>.</PageHead>
@@ -63,7 +61,7 @@ export function ProviderPage() {
     .slice(0, 12);
   // The models that moved most recently lead; the rest in listing order.
   const movers = active.slice().sort((a, b) => (b.lastChangedAt || "").localeCompare(a.lastChangedAt || "") || b.firstSeenAt.localeCompare(a.firstSeenAt)).slice(0, 12);
-  const lastMove = (m: typeof active[number]) => ownRecent.find((e) => e.modelId === m.modelId && e.kind === "changed" && e.field === "promptPrice");
+  const lastMove = (m: typeof active[number]) => data.events.find((e) => e.modelId === m.modelId && e.kind === "changed" && e.field === "promptPrice");
 
   return (
     <div class="stack">
@@ -88,6 +86,7 @@ export function ProviderPage() {
       ) : null}
 
       <Section title="Models" hint={`${active.length} listed, most recently moved first`}>
+        {active.length === 0 ? <Empty>No models are listed under this name on OpenRouter. Its status page is still checked every hour.</Empty> : (
         <div class="tw">
           <table aria-label={`${name} models`}>
             <thead><tr><th>Model</th><th class="n">Context</th><th class="n">In $/M</th><th class="n">Out $/M</th><th>Last move</th><th>Listed</th></tr></thead>
@@ -115,6 +114,7 @@ export function ProviderPage() {
             </tbody>
           </table>
         </div>
+        )}
       </Section>
 
       {medianSeries.length ? (

@@ -207,14 +207,14 @@ async function ingestRows(c, source, rows, runAt) {
 
 async function collectEpoch(c) {
   const res = await withBackoff(async () => {
-    const r = await fetch(EPOCH_ZIP, { headers: { "user-agent": "ai-observatory collector (+https://ai-observatory.view.fast)" } });
+    const r = await fetch(EPOCH_ZIP, { headers: { "user-agent": "ai-observatory collector (+https://ai-observatory.view.fast)" }, signal: AbortSignal.timeout(15_000) });
     if (!r.ok) {
       const err = new Error(`${EPOCH_ZIP} -> ${r.status}`);
       err.status = r.status;
       throw err;
     }
     return r.arrayBuffer();
-  });
+  }, { deadline: c.deadline });
   const zip = await unzip(res);
 
   // Many rows leave the organisation blank; Epoch's model list fills it in.
@@ -245,7 +245,7 @@ async function collectArena(c) {
   const rows = [];
   let done = false;
   for (let page = 0; page < ARENA_PAGES_MAX && !done; page++) {
-    const body = await withBackoff(() => getJson(`${ARENA_ROWS}&offset=${page * 100}&length=100`));
+    const body = await withBackoff(() => getJson(`${ARENA_ROWS}&offset=${page * 100}&length=100`), { deadline: c.deadline });
     const list = Array.isArray(body?.rows) ? body.rows : [];
     if (list.length === 0) break;
     for (const { row } of list) {

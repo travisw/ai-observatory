@@ -8,6 +8,7 @@ import { Link, useQuery } from "@spacefast/zero/client";
 
 import { formatContext, money } from "../../shared/model";
 import { isAlias, providerName } from "../../shared/providers";
+import { canonicalKey } from "../../shared/sources";
 import { headlines, type Story } from "../../shared/stories";
 import type { DailyRow, HomeModel, HomePageData, LifecycleRow, RecordRow } from "../../shared/types";
 import { Delta, Fig, LineChart, More, Pill, Rec, Section, Skeleton, StoryRow, StoryTable } from "../components/Wire";
@@ -24,7 +25,8 @@ export function departures(rows: LifecycleRow[], models: HomeModel[], keys: Map<
   const seen = new Map<string, Departure>();
   for (const row of rows.slice().sort((a, b) => (rank[a.source] ?? 3) - (rank[b.source] ?? 3))) {
     if (!row.retiresAt || row.retiresNote === "not sooner than") continue;
-    const id = `${row.provider}/${row.modelId}`;
+    // Matched on the shared key, as on the Retirements page, so one model is one line and the counts agree.
+    const id = row.key || `${row.provider}/${row.modelId}`;
     if (seen.has(id)) continue;
     const tracked = keys.get(row.key);
     seen.set(id, {
@@ -40,7 +42,7 @@ export function departures(rows: LifecycleRow[], models: HomeModel[], keys: Map<
   }
   for (const m of models) {
     if (!m.expirationDate || isAlias(m.modelId)) continue;
-    const id = `openrouter/${m.modelId}`;
+    const id = canonicalKey(m.provider, m.modelId);
     if (seen.has(id)) continue;
     seen.set(id, {
       key: id,
@@ -109,7 +111,8 @@ export function HomePage() {
   const statuses = page.statuses;
   const degraded = statuses.filter((s) => s.indicator !== "none" && s.indicator !== "unreachable" && s.indicator !== "unknown").length;
   const leaving = departures(page.retiring ?? [], models, keys);
-  const leavingSoon = leaving.filter((d) => daysUntil(d.retiresAt) <= 31).length;
+  // Same window as the Retirements page's "retiring within 30 days", so the two numbers agree.
+  const leavingSoon = leaving.filter((d) => daysUntil(d.retiresAt) <= 30).length;
 
   // The lead: the strongest story of the last day (or the shortest window that has three), aliases aside.
   const candidates = stories.filter((s) => s.kind !== "drift" && !isAlias(s.modelId) && s.source !== "hosts");
@@ -122,15 +125,18 @@ export function HomePage() {
   const leadGood = lead && leadDelta !== null ? deltaIsGood(lead, leadDelta) : true;
   const leadTone = leadDelta === null ? "" : leadGood ? "cut" : "rise";
   const leadHref = lead ? storyHref(lead, keys) : null;
-  const leadDay = lead ? (lead.at.slice(0, 10) === today ? `${hm(lead.at)} UTC` : `${dayShort(lead.at)}, ${hm(lead.at)} UTC`) : "";
+  const leadToday = Boolean(lead && lead.at.slice(0, 10) === today);
+  const leadDay = lead ? (leadToday ? `${hm(lead.at)} UTC` : `${dayShort(lead.at)}, ${hm(lead.at)} UTC`) : "";
 
   // The index chart from the daily rollup.
   const days = Array.isArray(daily) ? daily : [];
-  const num = (v: string) => Number(v);
+  // An empty basket is written as ""; Number("") would plot it as $0.
+  const num = (v: string) => (v === "" ? NaN : Number(v));
   const indexSeries = [
-    { label: "Frontier", color: "#ece9e0", values: days.map((d) => num(d.frontierIn)).filter(Number.isFinite) },
-    { label: "Mid", color: "#9fb3ff", values: days.map((d) => num(d.midIn)).filter(Number.isFinite) },
-    { label: "Budget", color: "#5fcf8a", values: days.map((d) => num(d.budgetIn)).filter(Number.isFinite) },
+    // Kept one value per day, gaps included, so every line's points sit over the same dates.
+    { label: "Frontier", color: "#ece9e0", values: days.map((d) => num(d.frontierIn)) },
+    { label: "Mid", color: "#9fb3ff", values: days.map((d) => num(d.midIn)) },
+    { label: "Budget", color: "#5fcf8a", values: days.map((d) => num(d.budgetIn)) },
   ];
   const latestDay = days.length ? days[days.length - 1] : null;
 
@@ -158,7 +164,7 @@ export function HomePage() {
         <span><b>{providers.size}</b> providers</span>
         <span><b>{changesToday}</b> {changesToday === 1 ? "change" : "changes"} today</span>
         {cuts + rises > 0 ? <span><b class="cut">{cuts}</b> {cuts === 1 ? "cut" : "cuts"} · <b class="rise">{rises}</b> {rises === 1 ? "rise" : "rises"}</span> : null}
-        <span><b>{leavingSoon}</b> retiring this month</span>
+        <span><b>{leavingSoon}</b> retiring within 30 days</span>
         <span>{statuses.length === 0 ? <b class="soft">status pending</b> : degraded === 0 ? <b class="cut">all operational</b> : <b class="warn">{degraded} degraded</b>}</span>
         {checked ? <span>checked <b>{hm(checked)}</b> UTC</span> : null}
       </div>
@@ -179,15 +185,15 @@ export function HomePage() {
               ) : lead.detail ? <p class="deck num">{lead.detail}</p> : null}
               <p class="deck">
                 {lead.kind === "repriced" || lead.kind === "resized"
-                  ? <>{providerName(lead.provider)} changed the listing at {hm(lead.at)} UTC, one of {plural(changesToday, "change")} recorded today. {lead.confirmedBy?.length ? `The same move is on ${lead.confirmedBy.join(" and ")}.` : "The other catalogues we check have not recorded it yet."}</>
-                  : <>Recorded at {hm(lead.at)} UTC, one of {plural(changesToday, "change")} today.{lead.more.length ? ` Also: ${lead.more.join("; ")}.` : ""}</>}
+                  ? <>{providerName(lead.provider)} changed the listing at {hm(lead.at)} UTC{leadToday ? `, one of ${plural(changesToday, "change")} recorded today` : ` on ${dayShort(lead.at)}`}. {lead.confirmedBy?.length ? `The same move is on ${lead.confirmedBy.join(" and ")}.` : "The other catalogues we check have not recorded it yet."}</>
+                  : <>Recorded at {hm(lead.at)} UTC{leadToday ? `, one of ${plural(changesToday, "change")} today` : ` on ${dayShort(lead.at)}`}.{lead.more.length ? ` Also: ${lead.more.join("; ")}.` : ""}</>}
                 {leadHref ? <> <Link to={leadHref}>Full history of {holder(lead.modelId)} →</Link></> : null}
               </p>
             </>
           ) : (
             <p class="deck">Nothing recorded yet. The first changes appear after the next check.</p>
           )}
-          <Section title={changesToday > 1 ? "Also today" : "Recent"} action={<More to="/changes">All changes</More>}>
+          <Section title={rest.length && rest.every((s) => s.at.slice(0, 10) === today) ? "Also today" : "Recent"} action={<More to="/changes">All changes</More>}>
             {rest.length === 0 ? <p class="note">No other changes yet.</p> : (
               <StoryTable label="Recent changes">
                 {rest.map((s) => <StoryRow key={s.key} story={s} href={storyHref(s, keys)} date={s.at.slice(0, 10) !== today} />)}
@@ -283,7 +289,7 @@ export function HomePage() {
       <div class="records" aria-label="Records">
         {unchanged ? <Rec value={unchanged.days.toLocaleString()} label="days without a price change" holder={holder(unchanged.modelId)} href={modelHref(unchanged.modelId)} /> : null}
         {cutIn ? <Rec value={`−${Math.round(Math.abs(Number(cutIn.value)))}%`} label="largest input price cut" holder={holder(cutIn.modelId)} href={modelHref(cutIn.modelId)} /> : null}
-        {ctx ? <Rec value={formatContext(ctx.value)} label="largest context increase" holder={holder(ctx.modelId)} href={modelHref(ctx.modelId)} /> : null}
+        {ctx ? <Rec value={`+${formatContext(ctx.value)}`} label="largest context increase" holder={holder(ctx.modelId)} href={modelHref(ctx.modelId)} /> : null}
         {shortest ? <Rec value={Number(shortest.value).toLocaleString()} label={`${Number(shortest.value) === 1 ? "day" : "days"} listed, the shortest ever`} holder={holder(shortest.modelId)} href={modelHref(shortest.modelId)} /> : null}
       </div>
     </div>
